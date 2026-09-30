@@ -1,6 +1,28 @@
 .idea/
+.vscode/
 .venv/
-/__pycache__/
+venv/
+__pycache__/
 *.py[cod]
 *$py.class
-.clinerules
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+/media/
+/staticfiles/
+backend/.env
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.log
+
+# Env
+.env
+!/.env.example
+!backend/.env.example

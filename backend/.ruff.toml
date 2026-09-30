@@ -1,0 +1,25 @@
+line-length = 88
+target-version = "py313"
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "RUF012",  # mutable class defaults are idiomatic for Django Meta
+    "B008",    # function calls in defaults are idiomatic for DRF
+]
+
+[lint.per-file-ignores]
+"**/migrations/*" = ["I001", "RUF012", "E501"]
+"tests/*" = ["B011"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
