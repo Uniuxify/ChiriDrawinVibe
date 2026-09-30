@@ -9,6 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import { register } from "../../api/auth";
+import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
 
 /** Registration screen: username + password. */
@@ -35,8 +36,7 @@ export default function RegisterPage() {
       );
       navigate("/");
     } catch (err) {
-      const data = (err as { response?: { data?: unknown } })?.response?.data;
-      setError(formatError(data) ?? "Registration failed.");
+      setError(extractApiMessage(err, "Registration failed."));
     } finally {
       setLoading(false);
     }
@@ -78,28 +78,3 @@ export default function RegisterPage() {
   );
 }
 
-/** Extract a human-readable message from an API error payload. */
-function formatError(data: unknown): string | null {
-  if (typeof data === "string") {
-    return data;
-  }
-  if (data && typeof data === "object") {
-    const record = data as Record<string, unknown>;
-    if (typeof record.detail === "string") {
-      return record.detail;
-    }
-    if (typeof record.username === "object") {
-      const list = record.username as string[];
-      return list.join(" ");
-    }
-    if (typeof record.password === "object") {
-      const list = record.password as string[];
-      return list.join(" ");
-    }
-    if (typeof record.non_field_errors === "object") {
-      const list = record.non_field_errors as string[];
-      return list.join(" ");
-    }
-  }
-  return null;
-}

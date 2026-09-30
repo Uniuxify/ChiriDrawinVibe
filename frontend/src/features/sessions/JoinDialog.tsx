@@ -11,6 +11,7 @@ import {
   TextField,
 } from "@mui/material";
 import { joinSession } from "../../api/sessions";
+import { extractApiMessage } from "../../shared/apiError";
 
 interface Props {
   open: boolean;
@@ -35,7 +36,7 @@ export default function JoinDialog({ open, onClose }: Props) {
       setCode("");
       navigate(`/sessions/${session.id}`);
     } catch (err) {
-      setError(extract(err) ?? "Could not join the session.");
+      setError(extractApiMessage(err, "Could not join the session."));
     } finally {
       setLoading(false);
     }
@@ -69,9 +70,3 @@ export default function JoinDialog({ open, onClose }: Props) {
   );
 }
 
-/** Extract a human-readable message from an API error. */
-function extract(err: unknown): string | null {
-  const data = (err as { response?: { data?: { detail?: string } } })?.response
-    ?.data;
-  return data?.detail ?? null;
-}

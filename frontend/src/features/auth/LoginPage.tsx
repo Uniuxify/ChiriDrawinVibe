@@ -9,6 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import { login } from "../../api/auth";
+import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
 
 /** Login screen: username + password. */
@@ -35,10 +36,7 @@ export default function LoginPage() {
       );
       navigate("/");
     } catch (err) {
-      const detail =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data
-          ?.detail;
-      setError(detail ?? "Invalid username or password.");
+      setError(extractApiMessage(err, "Invalid username or password."));
     } finally {
       setLoading(false);
     }

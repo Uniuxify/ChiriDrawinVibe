@@ -9,6 +9,7 @@ from apps.cells.views import (
     CellAutosaveView,
     CellCommitView,
     CellContextView,
+    CellHistoryView,
     CellLockView,
     CellUnlockView,
 )
@@ -22,6 +23,11 @@ urlpatterns = [
         name="cell-autosave",
     ),
     path("cells/<uuid:cell_id>/commit", CellCommitView.as_view(), name="cell-commit"),
+    path(
+        "cells/<uuid:cell_id>/history",
+        CellHistoryView.as_view(),
+        name="cell-history",
+    ),
     path(
         "cells/<uuid:cell_id>/context",
         CellContextView.as_view(),

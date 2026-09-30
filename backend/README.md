@@ -41,6 +41,10 @@ python manage.py create_admin          # optional: creates a superuser/admin
 python manage.py runserver
 ```
 
+> **Python**: use a regular (non free-threaded) CPython 3.10+. The
+> free-threaded build of 3.13 (`python3.13t`) cannot install `cffi`, which is
+> required by `cairosvg`.
+
 The API is served under `/api/v1/`. Public configuration is available at
 `GET /api/v1/config`.
 
@@ -74,6 +78,8 @@ Tests live in `backend/tests/`:
 - `test_context.py` — pure geometry of the read-only context zone
   (rectangle/circle, `min`/`max`/percent radius, grid-edge clipping).
 - `test_sessions.py` — session start, cell distribution, lifecycle guards.
+- `test_commit.py` — commit resilience when rendering fails, cell revision
+  exposure in unlock/state payloads.
 
 Run with `pytest`. The suite uses an isolated test database via `pytest-django`.
 

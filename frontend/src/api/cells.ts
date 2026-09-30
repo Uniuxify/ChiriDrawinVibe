@@ -83,3 +83,26 @@ export async function fetchCellContext(
 export async function adminUnlockCell(cellId: string): Promise<void> {
   await api.post(`/cells/${cellId}/admin/unlock`);
 }
+
+/** History payload returned for read-only cell rendering. */
+export interface CellHistoryPayload {
+  operations: DrawOperation[];
+  revision: number;
+  is_final: boolean;
+}
+
+/**
+ * Fetch the stored drawing history of a cell.
+ *
+ * Args:
+ *   cellId: Cell UUID as a string.
+ *
+ * Returns:
+ *   The final (or latest) history of the cell.
+ */
+export async function fetchCellHistory(
+  cellId: string,
+): Promise<CellHistoryPayload> {
+  const { data } = await api.get<CellHistoryPayload>(`/cells/${cellId}/history`);
+  return data;
+}

@@ -27,6 +27,11 @@ function statusColor(status: string): "success" | "default" | "info" {
 
 /** Card representing one session in the list. */
 function SessionCard({ session }: { session: SessionDTO }) {
+  const joined = session.players?.length;
+  const playersLabel =
+    joined === undefined
+      ? `${session.players_count} players`
+      : `${joined} / ${session.players_count} players joined`;
   return (
     <Card variant="outlined" sx={{ minWidth: 260 }}>
       <CardContent sx={{ pb: 1 }}>
@@ -38,7 +43,7 @@ function SessionCard({ session }: { session: SessionDTO }) {
           {session.is_public && <Chip size="small" label="public" />}
         </Box>
         <Typography variant="body2" color="text.secondary">
-          {session.grid_cols}×{session.grid_rows} · {session.players_count} players
+          {session.grid_cols}×{session.grid_rows} · {playersLabel}
         </Typography>
       </CardContent>
       <CardActions>

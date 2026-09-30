@@ -36,7 +36,7 @@ def on_cell_committed(cell: Cell) -> None:
 
     from apps.rendering.tasks import render_cell_task
 
-    render_cell_task.delay(str(cell.id))
+    dispatch_render(render_cell_task, str(cell.id), "cell")
 
     iteration = session.iterations.filter(state=IterationState.ACTIVE).first()
     if iteration is not None:
@@ -140,7 +140,28 @@ def _maybe_finish_session(session: GameSession) -> None:
         return
 
     finish_session(session)
-    render_session_task.delay(session.id)
+    dispatch_render(render_session_task, session.id, "session")
+
+
+def dispatch_render(task, target: int | str, label: str) -> None:
+    """Enqueue a render task without letting failures break the request.
+
+    Rendering is a side effect of a commit or of a session finish; a broken
+    rasterizer must never turn a successful API call into a 500 response.
+
+    Args:
+        task: The Celery task to enqueue.
+        target: Cell id or session id passed to the task.
+        label: Human readable subject used in the log message.
+    """
+    try:
+        task.delay(target)
+    except Exception:
+        logger.exception(
+            "Rendering of %s %s failed; the API request is unaffected",
+            label,
+            target,
+        )
 
 
 @transaction.atomic

@@ -76,8 +76,11 @@ def test_start_requires_matching_player_count(make_session, django_user_model):
     session = make_session(owner_id=owner.id, players_count=3)
     SessionPlayer.objects.create(session=session, user=player)
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as excinfo:
         start_session(session)
+
+    assert "1 of 3 required" in str(excinfo.value)
+    assert excinfo.value.details == {"joined": 1, "required": 3}
 
 
 @pytest.mark.django_db

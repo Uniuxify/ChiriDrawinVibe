@@ -32,11 +32,19 @@ def _rasterize_with_cairosvg(svg: str, width: int, height: int) -> bytes | None:
         logger.warning("CairoSVG is not available; using the fallback renderer.")
         return None
 
-    return cairosvg.svg2png(
-        bytestring=svg.encode("utf-8"),
-        output_width=width,
-        output_height=height,
-    )
+    try:
+        return cairosvg.svg2png(
+            bytestring=svg.encode("utf-8"),
+            output_width=width,
+            output_height=height,
+        )
+    except Exception:
+        # A missing native cairo library fails only at call time on some
+        # platforms, after the import itself succeeded.
+        logger.warning(
+            "CairoSVG failed to rasterize the SVG; using the fallback renderer."
+        )
+        return None
 
 
 def _rasterize_with_pillow(

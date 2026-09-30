@@ -69,9 +69,11 @@ def start_session(session: GameSession) -> GameSession:
     if locked.status != SessionStatus.DRAFT:
         raise ConflictError("Only draft sessions can be started.")
 
-    if locked.players.filter(is_active=True).count() != locked.players_count:
+    joined = locked.players.filter(is_active=True).count()
+    if joined != locked.players_count:
         raise ValidationError(
-            "The number of joined players must match players_count before start."
+            f"Not enough players joined: {joined} of {locked.players_count} required.",
+            details={"joined": joined, "required": locked.players_count},
         )
 
     if locked.cells.exists():

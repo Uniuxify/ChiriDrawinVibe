@@ -17,6 +17,11 @@ import { Layer, Line, Rect, Stage } from "react-konva";
 import type Konva from "konva";
 import type { CellDTO, DrawOperation, SessionDTO } from "../../api/types";
 import { autosaveCell, commitCell } from "../../api/cells";
+import { extractApiMessage } from "../../shared/apiError";
+import {
+  strokesFromHistory,
+  type RenderedStroke,
+} from "../../shared/renderHistory";
 
 type Tool = "brush" | "eraser";
 
@@ -25,13 +30,6 @@ interface Props {
   session: SessionDTO;
   onClose: () => void;
   onCommitted: () => void;
-}
-
-interface Stroke {
-  points: number[];
-  color: string;
-  size: number;
-  erase: boolean;
 }
 
 const PALETTE = [
@@ -46,35 +44,6 @@ const PALETTE = [
 ];
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
-
-/** Draw the rendered strokes described by a history snapshot. */
-function strokesFromHistory(
-  operations: DrawOperation[],
-  cellWidth: number,
-  cellHeight: number,
-): Stroke[] {
-  const result: Stroke[] = [];
-  for (const operation of operations) {
-    if (operation.type === "clear") {
-      result.length = 0;
-      continue;
-    }
-    if (operation.type !== "stroke" && operation.type !== "erase") {
-      continue;
-    }
-    const points = (operation.points ?? []).flatMap(([x, y]) => [
-      x * cellWidth,
-      y * cellHeight,
-    ]);
-    result.push({
-      points,
-      color: operation.color ?? "#000000",
-      size: (operation.size ?? 0.01) * cellWidth,
-      erase: operation.type === "erase",
-    });
-  }
-  return result;
-}
 
 /**
  * Single-cell drawing editor with brush/eraser, client-side undo/redo,
@@ -97,7 +66,7 @@ export default function CellEditor({
   const [isDrawing, setIsDrawing] = useState(false);
   const [history, setHistory] = useState<DrawOperation[]>([]);
   const [redoStack, setRedoStack] = useState<DrawOperation[]>([]);
-  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [strokes, setStrokes] = useState<RenderedStroke[]>([]);
   const [revision, setRevision] = useState(cell.revision ?? 0);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
     "idle",
@@ -165,7 +134,7 @@ export default function CellEditor({
       setError(null);
     } catch (err) {
       setSaveState("idle");
-      setError(extractMessage(err));
+      setError(extractApiMessage(err, "Could not save the drawing."));
     }
   }, [cell.id, history]);
 
@@ -221,15 +190,15 @@ export default function CellEditor({
     const normalized: number[][] = [];
     for (let index = 0; index < last.points.length; index += 2) {
       normalized.push([
-        last.points[index] / cellWidth,
-        last.points[index + 1] / cellHeight,
+        clamp01(last.points[index] / cellWidth),
+        clamp01(last.points[index + 1] / cellHeight),
       ]);
     }
     const operation: DrawOperation = {
       type: last.erase ? "erase" : "stroke",
       ts: Date.now(),
       color: last.color,
-      size: last.size / cellWidth,
+      size: clampSize(last.size / cellWidth),
       points: normalized,
     };
     setHistory((current) => [...current, operation]);
@@ -248,7 +217,7 @@ export default function CellEditor({
       setCommitOpen(false);
       onCommitted();
     } catch (err) {
-      setError(extractMessage(err));
+      setError(extractApiMessage(err, "Could not commit the cell."));
     }
   }
 
@@ -420,9 +389,12 @@ export default function CellEditor({
   );
 }
 
-/** Extract a readable message from an API error. */
-function extractMessage(err: unknown): string {
-  const data = (err as { response?: { data?: { detail?: string } } })?.response
-    ?.data;
-  return data?.detail ?? "The request failed.";
+/** Clamp a normalized coordinate into the [0, 1] range required by the API. */
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/** Clamp a relative stroke size into the (0, 1] range required by the API. */
+function clampSize(value: number): number {
+  return Math.min(1, Math.max(0.001, value));
 }

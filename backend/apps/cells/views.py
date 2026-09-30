@@ -19,7 +19,7 @@ from apps.cells.services import (
     lock_cell,
     unlock_cell,
 )
-from apps.common.enums import CellStatus
+from apps.common.enums import CellStatus, SessionStatus
 from apps.common.errors import NotFoundError, PermissionDeniedError
 from apps.common.permissions import IsAdmin
 
@@ -119,6 +119,61 @@ class CellCommitView(APIView):
 
         on_cell_committed(cell)
         return Response(CellSerializer(cell).data)
+
+
+class CellHistoryView(APIView):
+    """Return the stored drawing history of a cell."""
+
+    permission_classes = ()
+
+    def get(self, request: Request, cell_id) -> Response:
+        """Return the final (or latest) history revision of a cell.
+
+        Args:
+            request: The current request; anonymous callers are allowed only
+                for public finished sessions.
+            cell_id: Cell UUID.
+
+        Returns:
+            A response with the drawing operations, the current cell revision
+            and whether the history is the committed one.
+
+        Raises:
+            NotFoundError: If the cell does not exist.
+            PermissionDeniedError: If the caller may not see the history.
+        """
+        cell = Cell.objects.filter(id=cell_id).select_related("session").first()
+        if cell is None:
+            raise NotFoundError("Cell not found.")
+
+        session = cell.session
+        is_public_finished = (
+            session.is_public and session.status == SessionStatus.FINISHED
+        )
+        if not is_public_finished:
+            user = request.user
+            if not user.is_authenticated:
+                raise PermissionDeniedError("Sign in to view this cell.")
+            is_owner = session.owner_id == user.id
+            is_player = session.players.filter(user=user).exists()
+            if not (is_owner or is_player):
+                raise PermissionDeniedError("You cannot view this cell.")
+
+        history = (
+            cell.histories.filter(is_final=True).order_by("-revision").first()
+            or cell.histories.order_by("-revision").first()
+        )
+        if history is None:
+            return Response(
+                {"operations": [], "revision": cell.revision, "is_final": False}
+            )
+        return Response(
+            {
+                "operations": history.operations,
+                "revision": cell.revision,
+                "is_final": history.is_final,
+            }
+        )
 
 
 class CellContextView(APIView):

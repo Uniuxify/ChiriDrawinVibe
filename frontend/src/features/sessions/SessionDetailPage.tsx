@@ -22,6 +22,7 @@ import {
 } from "../../api/sessions";
 import { unlockCell } from "../../api/cells";
 import type { CellDTO } from "../../api/types";
+import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
 import SessionCanvas from "../canvas/SessionCanvas";
 import CellEditor from "../editor/CellEditor";
@@ -53,14 +54,14 @@ export default function SessionDetailPage() {
     mutationFn: () => startSession(sessionId),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] }),
-    onError: (e) => setError(extract(e)),
+    onError: (e) => setError(extractApiMessage(e)),
   });
 
   const finishMut = useMutation({
     mutationFn: () => finishSession(sessionId),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] }),
-    onError: (e) => setError(extract(e)),
+    onError: (e) => setError(extractApiMessage(e)),
   });
 
   const unlockMut = useMutation({
@@ -84,7 +85,7 @@ export default function SessionDetailPage() {
     },
     onError: (e) => {
       setConfirmOpen(false);
-      setError(extract(e));
+      setError(extractApiMessage(e));
     },
   });
 
@@ -112,7 +113,7 @@ export default function SessionDetailPage() {
           }
         >
           Could not load session {sessionId}.{" "}
-          {stateQuery.error != null && extract(stateQuery.error)}
+          {stateQuery.error != null && extractApiMessage(stateQuery.error)}
         </Alert>
         <Button component={RouterLink} to="/" sx={{ mt: 2 }}>
           ← Back to sessions
@@ -134,6 +135,8 @@ export default function SessionDetailPage() {
   } = state;
   const finished = session.status === "finished";
   const finishedModal = finished && !finishedDismissed && revealed.size === 0;
+  const joinedPlayers = session.players ?? [];
+  const joinedCount = joinedPlayers.length;
 
   function handleSelect(cell: CellDTO) {
     setError(null);
@@ -273,6 +276,19 @@ export default function SessionDetailPage() {
             Grid: {session.grid_cols}×{session.grid_rows}
           </Typography>
           <Typography variant="body2" color="text.secondary">
+            Players: {joinedCount} / {session.players_count} joined
+          </Typography>
+          {joinedCount > 0 && (
+            <Typography variant="body2" color="text.secondary">
+              {joinedPlayers.map((player) => player.username).join(", ")}
+            </Typography>
+          )}
+          {session.status === "draft" && joinedCount < session.players_count && (
+            <Typography variant="body2" color="warning.main">
+              Not enough players joined to start the session.
+            </Typography>
+          )}
+          <Typography variant="body2" color="text.secondary">
             Join code: {session.join_code}
           </Typography>
           <Link
@@ -344,9 +360,3 @@ export default function SessionDetailPage() {
   );
 }
 
-/** Extract an API error message. */
-function extract(err: unknown): string {
-  const data = (err as { response?: { data?: { detail?: string } } })?.response
-    ?.data;
-  return data?.detail ?? "Request failed.";
-}

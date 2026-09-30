@@ -22,6 +22,15 @@ export type ContextShape = "rectangle" | "circle";
 export type ContextRadiusMode = "min" | "max" | "percent";
 export type DistributionStrategy = "random" | "min_adjacent";
 
+/** A participant of a session as returned by the sessions API. */
+export interface SessionPlayerDTO {
+  user_id: number;
+  username: string;
+  joined_at: string;
+  is_active: boolean;
+  is_original: boolean;
+}
+
 export interface SessionDTO {
   id: number;
   name: string;
@@ -43,6 +52,8 @@ export interface SessionDTO {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  /** Participants that have joined the session so far. */
+  players?: SessionPlayerDTO[];
 }
 
 export type CellStatus = "empty" | "unlocked" | "filled" | "orphan";

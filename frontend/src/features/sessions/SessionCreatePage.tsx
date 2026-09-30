@@ -20,6 +20,7 @@ import type {
   ContextShape,
   DistributionStrategy,
 } from "../../api/types";
+import { extractApiMessage } from "../../shared/apiError";
 
 interface FormState {
   name: string;
@@ -78,8 +79,7 @@ export default function SessionCreatePage() {
       const session = await createSession(form);
       navigate(`/sessions/${session.id}`);
     } catch (err) {
-      const data = (err as { response?: { data?: unknown } })?.response?.data;
-      setError(extractDetail(data) ?? "Could not create the session.");
+      setError(extractApiMessage(err, "Could not create the session."));
     } finally {
       setLoading(false);
     }
@@ -248,15 +248,3 @@ export default function SessionCreatePage() {
   );
 }
 
-/** Extract a readable message from an API error payload. */
-function extractDetail(data: unknown): string | null {
-  if (typeof data === "string") return data;
-  if (data && typeof data === "object") {
-    const record = data as Record<string, unknown>;
-    if (typeof record.detail === "string") return record.detail;
-    const first = Object.values(record)[0];
-    if (Array.isArray(first) && typeof first[0] === "string") return first[0];
-    if (typeof first === "string") return first;
-  }
-  return null;
-}

@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from apps.common.enums import CellStatus, IterationState, SessionStatus
 from apps.common.errors import ConflictError, NotFoundError, PermissionDeniedError
 from apps.common.permissions import IsAdmin
+from apps.iterations.services import dispatch_render
 from apps.sessions.models import GameSession, SessionPlayer
 from apps.sessions.serializers import (
     AddPlayerSerializer,
@@ -329,6 +330,10 @@ class FinishSessionView(APIView):
         session = _get_session(session_id, request.user)
         _require_owner(session, request.user)
         session = finish_session(session)
+
+        from apps.rendering.tasks import render_session_task
+
+        dispatch_render(render_session_task, session.id, "session")
         return Response(SessionSerializer(session).data)
 
 
@@ -361,6 +366,7 @@ class SessionStateView(APIView):
                 "owner_id": cell.owner_id,
                 "locked_by_user_id": cell.locked_by_id,
                 "comment": cell.comment or None,
+                "revision": cell.revision,
                 "is_mine": cell.owner_id == request.user.id,
                 "has_comment": bool(cell.comment),
             }
