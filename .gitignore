@@ -26,3 +26,6 @@ frontend/.vite/
 .env
 !/.env.example
 !backend/.env.example
+
+# Cline
+.clinerules
