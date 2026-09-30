@@ -5,6 +5,7 @@ import RegisterPage from "./features/auth/RegisterPage";
 import SessionListPage from "./features/sessions/SessionListPage";
 import SessionCreatePage from "./features/sessions/SessionCreatePage";
 import SessionDetailPage from "./features/sessions/SessionDetailPage";
+import CellEditorPage from "./features/editor/CellEditorPage";
 import PublicListPage from "./features/viewer/PublicListPage";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -31,6 +32,14 @@ export default function App() {
         element={
           <RequireAuth>
             <SessionCreatePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/sessions/:id/cells/:cellId"
+        element={
+          <RequireAuth>
+            <CellEditorPage />
           </RequireAuth>
         }
       />

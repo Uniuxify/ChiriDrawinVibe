@@ -23,15 +23,33 @@ export interface AutosaveResult {
   size_bytes: number;
 }
 
+/** Inclusive grid bounds of the read-only context zone. */
+export interface ContextBounds {
+  min_row: number;
+  max_row: number;
+  min_col: number;
+  max_col: number;
+}
+
+/** One cell of the read-only context zone around the unlocked cell. */
+export interface ContextNeighbor {
+  cell_id: string;
+  row: number;
+  col: number;
+  status: string;
+  comment: string | null;
+  /** Server-side raster metadata, when the neighbour has been rendered. */
+  raster: { url: string; width: number; height: number } | null;
+}
+
 export interface ContextPayload {
-  /** Raster or neighbour data for the read-only context zone. */
-  neighbors?: Array<{
-    row: number;
-    col: number;
-    image?: string;
-    status: string;
-    comment?: string | null;
-  }>;
+  context: {
+    cell_id: string;
+    neighbor_ids: string[];
+    bounds: ContextBounds;
+  } | null;
+  /** Every neighbour of the zone, filled or not. */
+  neighbors: ContextNeighbor[];
 }
 
 /** Unlock a cell owned by the caller and return its frozen context. */

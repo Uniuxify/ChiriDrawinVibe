@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link as RouterLink, useParams } from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -25,19 +25,18 @@ import type { CellDTO } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
 import SessionCanvas from "../canvas/SessionCanvas";
-import CellEditor from "../editor/CellEditor";
 
 /** Active session screen: grid, indicators, admin controls, editor entry. */
 export default function SessionDetailPage() {
   const { id } = useParams();
   const sessionId = Number(id);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const myUserId = useAuthStore((s) => s.userId);
   const isAdmin = useAuthStore((s) => s.isAdmin);
 
   const [adminMode, setAdminMode] = useState(false);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
-  const [editing, setEditing] = useState<CellDTO | null>(null);
   const [pendingCell, setPendingCell] = useState<CellDTO | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [finishedDismissed, setFinishedDismissed] = useState(false);
@@ -72,16 +71,7 @@ export default function SessionDetailPage() {
       await queryClient.invalidateQueries({
         queryKey: ["session-state", sessionId],
       });
-      setEditing({
-        ...result.cell,
-        owner: result.cell.owner_id,
-        owner_id: result.cell.owner_id,
-        is_mine: true,
-        status: "unlocked",
-        locked_by_user_id: result.cell.owner_id,
-        comment: result.cell.comment,
-        revision: result.cell.revision,
-      });
+      navigate(`/sessions/${sessionId}/cells/${result.cell.id}`);
     },
     onError: (e) => {
       setConfirmOpen(false);
@@ -138,6 +128,10 @@ export default function SessionDetailPage() {
   const joinedPlayers = session.players ?? [];
   const joinedCount = joinedPlayers.length;
 
+  function openEditor(cellId: string) {
+    navigate(`/sessions/${sessionId}/cells/${cellId}`);
+  }
+
   function handleSelect(cell: CellDTO) {
     setError(null);
     if (finished) {
@@ -157,7 +151,7 @@ export default function SessionDetailPage() {
       cell.status === "unlocked" &&
       cell.locked_by_user_id === myUserId
     ) {
-      setEditing(cell);
+      openEditor(cell.id);
       return;
     }
 
@@ -341,22 +335,6 @@ export default function SessionDetailPage() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Editor */}
-      {editing && (
-        <CellEditor
-          cell={editing}
-          session={session}
-          onClose={() => setEditing(null)}
-          onCommitted={() => {
-            setEditing(null);
-            queryClient.invalidateQueries({
-              queryKey: ["session-state", sessionId],
-            });
-          }}
-        />
-      )}
     </Box>
   );
 }
-

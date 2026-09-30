@@ -200,23 +200,28 @@ class CellContextView(APIView):
 
         snapshot = CellContextSnapshot.objects.filter(cell=cell).first()
         if snapshot is None:
-            return Response({"context": None, "rasters": []})
+            return Response({"context": None, "neighbors": []})
 
-        rasters = []
-        for neighbour in cell.session.cells.filter(
-            id__in=snapshot.neighbor_ids, status=CellStatus.FILLED
-        ):
-            raster = neighbour.rasters.order_by("-created_at").first()
-            if raster is not None:
-                rasters.append(
-                    {
-                        "cell_id": str(neighbour.id),
-                        "row": neighbour.row,
-                        "col": neighbour.col,
-                        "raster": RasterSerializer(raster).data,
-                    }
-                )
-        return Response({"context": _context_payload(snapshot), "rasters": rasters})
+        neighbours = cell.session.cells.filter(id__in=snapshot.neighbor_ids)
+        payload = []
+        for neighbour in neighbours:
+            raster = None
+            if neighbour.status == CellStatus.FILLED:
+                latest = neighbour.rasters.order_by("-created_at").first()
+                if latest is not None:
+                    raster = RasterSerializer(latest).data
+            payload.append(
+                {
+                    "cell_id": str(neighbour.id),
+                    "row": neighbour.row,
+                    "col": neighbour.col,
+                    "status": neighbour.status,
+                    "comment": neighbour.comment or None,
+                    "raster": raster,
+                }
+            )
+        payload.sort(key=lambda item: (item["row"], item["col"]))
+        return Response({"context": _context_payload(snapshot), "neighbors": payload})
 
 
 class CellAdminUnlockView(APIView):
