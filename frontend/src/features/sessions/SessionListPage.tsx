@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -9,10 +10,7 @@ import {
   CardContent,
   Chip,
   CircularProgress,
-  Divider,
   Link,
-  Tab,
-  Tabs,
   Typography,
 } from "@mui/material";
 import { fetchMySessions, fetchPublicFinished } from "../../api/sessions";
@@ -20,19 +18,15 @@ import type { SessionDTO } from "../../api/types";
 import { useAuthStore } from "../../store/auth";
 import JoinDialog from "./JoinDialog";
 
-function statusColor(status: string) {
+/** Map a lifecycle status to a chip colour. */
+function statusColor(status: string): "success" | "default" | "info" {
   if (status === "active") return "success";
   if (status === "finished") return "default";
   return "info";
 }
 
-function SessionCard({
-  session,
-  action,
-}: {
-  session: SessionDTO;
-  action?: React.ReactNode;
-}) {
+/** Card representing one session in the list. */
+function SessionCard({ session }: { session: SessionDTO }) {
   return (
     <Card variant="outlined" sx={{ minWidth: 260 }}>
       <CardContent sx={{ pb: 1 }}>
@@ -40,16 +34,11 @@ function SessionCard({
           {session.name}
         </Typography>
         <Box sx={{ display: "flex", gap: 1, mb: 1 }}>
-          <Chip
-            size="small"
-            label={session.status}
-            color={statusColor(session.status) as "success" | "default" | "info"}
-          />
+          <Chip size="small" label={session.status} color={statusColor(session.status)} />
           {session.is_public && <Chip size="small" label="public" />}
         </Box>
         <Typography variant="body2" color="text.secondary">
-          {session.grid_cols}×{session.grid_rows} · {session.players_count}{" "}
-          players
+          {session.grid_cols}×{session.grid_rows} · {session.players_count} players
         </Typography>
       </CardContent>
       <CardActions>
@@ -60,55 +49,76 @@ function SessionCard({
         >
           Open
         </Button>
-        {action}
       </CardActions>
     </Card>
   );
 }
 
-/** Landing screen: the three blocks of sessions for the signed-in player. */
+/** A titled section holding a list of session cards. */
+function SessionBlock({
+  title,
+  sessions,
+  emptyText,
+}: {
+  title: string;
+  sessions: SessionDTO[];
+  emptyText: string;
+}) {
+  return (
+    <Box sx={{ mb: 4 }}>
+      <Typography variant="subtitle1" gutterBottom>
+        {title} ({sessions.length})
+      </Typography>
+      {sessions.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {emptyText}
+        </Typography>
+      ) : (
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2,
+            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+          }}
+        >
+          {sessions.map((s) => (
+            <SessionCard key={s.id} session={s} />
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+/** Landing screen with the three session blocks for the signed-in player. */
 export default function SessionListPage() {
-  const [tab, setTab] = useState(0);
   const [joinOpen, setJoinOpen] = useState(false);
   const username = useAuthStore((s) => s.username);
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["sessions", "mine"],
     queryFn: fetchMySessions,
     refetchInterval: 5000,
   });
 
-  const sessions = data ?? [];
-
   const { data: publicFinished } = useQuery({
     queryKey: ["sessions", "public"],
     queryFn: fetchPublicFinished,
-    enabled: isAdmin && tab === 2,
+    enabled: isAdmin,
   });
 
-  const { unfinished, active } = useMemo(() => {
-    const unfinished: SessionDTO[] = [];
-    const active: SessionDTO[] = [];
-    for (const s of sessions) {
-      if (s.status === "active") active.push(s);
-      else unfinished.push(s);
-    }
-    return { unfinished, active };
-  }, [sessions]);
+  const drafts = data?.drafts ?? [];
+  const active = data?.active ?? [];
+  const finished = data?.finished ?? [];
+  const empty = drafts.length === 0 && active.length === 0 && finished.length === 0;
 
   function logout() {
     clear();
     navigate("/login");
   }
-
-  if (isLoading) {
-    return <CircularProgress sx={{ display: "block", mx: "auto", mt: 8 }} />;
-  }
-
-  const empty = sessions.length === 0;
 
   return (
     <Box sx={{ maxWidth: 960, mx: "auto", p: 3 }}>
@@ -130,9 +140,11 @@ export default function SessionListPage() {
       </Box>
 
       <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-        <Button variant="contained" component={RouterLink} to="/sessions/new">
-          New session
-        </Button>
+        {isAdmin && (
+          <Button variant="contained" component={RouterLink} to="/sessions/new">
+            New session
+          </Button>
+        )}
         <Button variant="outlined" onClick={() => setJoinOpen(true)}>
           Join by code
         </Button>
@@ -146,57 +158,58 @@ export default function SessionListPage() {
         </Button>
       </Box>
 
-      <Tabs value={tab} onChange={(_, v: number) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Finished" />
-        <Tab label="Active" />
-        {isAdmin && <Tab label="All sessions" />}
-      </Tabs>
+      {isLoading && (
+        <CircularProgress sx={{ display: "block", mx: "auto", mt: 8 }} />
+      )}
 
-      {empty && (
-        <Typography color="text.secondary">
+      {error != null && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={() => refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Could not load your sessions.
+        </Alert>
+      )}
+
+      {!isLoading && error == null && empty && (
+        <Typography color="text.secondary" sx={{ mb: 2 }}>
           You are not a member of any session yet.
         </Typography>
       )}
 
-      {tab === 0 && (
-        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-          {unfinished.map((s) => (
-            <SessionCard key={s.id} session={s} />
-          ))}
-          {!empty && unfinished.length === 0 && (
-            <Typography color="text.secondary">Nothing here.</Typography>
-          )}
-        </Box>
-      )}
-
-      {tab === 1 && (
-        <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-          {active.map((s) => (
-            <SessionCard key={s.id} session={s} />
-          ))}
-          {active.length === 0 && (
-            <Typography color="text.secondary">No active sessions.</Typography>
-          )}
-        </Box>
-      )}
-
-      {tab === 2 && isAdmin && (
+      {!isLoading && error == null && (
         <>
-          <Divider sx={{ mb: 2 }} />
-          <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>
-            {(publicFinished ?? []).map((s) => (
-              <SessionCard key={s.id} session={s} />
-            ))}
-            {(publicFinished ?? []).length === 0 && (
-              <Typography color="text.secondary">
-                No public finished sessions.
-              </Typography>
-            )}
-          </Box>
+          <SessionBlock
+            title="Drafts"
+            sessions={drafts}
+            emptyText="No draft sessions."
+          />
+          <SessionBlock
+            title="Active sessions"
+            sessions={active}
+            emptyText="No active sessions."
+          />
+          <SessionBlock
+            title="Finished sessions"
+            sessions={finished}
+            emptyText="No finished sessions yet."
+          />
+
+          {isAdmin && (
+            <SessionBlock
+              title="Public finished sessions (admin)"
+              sessions={publicFinished ?? []}
+              emptyText="No public finished sessions."
+            />
+          )}
         </>
       )}
 
-      <Divider sx={{ my: 3 }} />
       <Link component={RouterLink} to="/public" variant="body2">
         Browse public finished sessions as a spectator
       </Link>

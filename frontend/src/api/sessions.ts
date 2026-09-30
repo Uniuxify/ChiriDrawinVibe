@@ -2,18 +2,21 @@
 
 import { api } from "./client";
 import type {
-  CellDTO,
   IterationDTO,
+  MySessionsResponse,
   PublicConfig,
   SessionDTO,
   SessionStateDTO,
 } from "./types";
 
-export async function fetchMySessions(): Promise<SessionDTO[]> {
-  const { data } = await api.get<SessionDTO[] | { results: SessionDTO[] }>(
-    "/sessions/mine",
-  );
-  return Array.isArray(data) ? data : data.results;
+/** Fetch the caller's sessions grouped by lifecycle status. */
+export async function fetchMySessions(): Promise<MySessionsResponse> {
+  const { data } = await api.get<MySessionsResponse>("/sessions/mine");
+  return {
+    drafts: data.drafts ?? [],
+    active: data.active ?? [],
+    finished: data.finished ?? [],
+  };
 }
 
 export async function fetchPublicFinished(): Promise<SessionDTO[]> {
@@ -38,8 +41,12 @@ export async function fetchSessionState(id: number): Promise<SessionStateDTO> {
   return data;
 }
 
-export async function joinSession(id: number, code: string): Promise<void> {
-  await api.post(`/sessions/${id}/join`, { join_code: code });
+/** Join a draft session by its join code. */
+export async function joinSession(code: string): Promise<SessionDTO> {
+  const { data } = await api.post<SessionDTO>("/sessions/join", {
+    join_code: code.trim().toUpperCase(),
+  });
+  return data;
 }
 
 export async function startSession(id: number): Promise<SessionDTO> {
@@ -50,13 +57,6 @@ export async function startSession(id: number): Promise<SessionDTO> {
 export async function finishSession(id: number): Promise<SessionDTO> {
   const { data } = await api.post<SessionDTO>(`/sessions/${id}/finish`);
   return data;
-}
-
-export async function fetchCells(id: number): Promise<CellDTO[]> {
-  const { data } = await api.get<CellDTO[] | { results: CellDTO[] }>(
-    `/sessions/${id}/cells`,
-  );
-  return Array.isArray(data) ? data : data.results;
 }
 
 export async function fetchIteration(id: number): Promise<IterationDTO | null> {

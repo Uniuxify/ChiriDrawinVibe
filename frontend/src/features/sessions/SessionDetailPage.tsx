@@ -42,7 +42,7 @@ export default function SessionDetailPage() {
   const [finishedDismissed, setFinishedDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: state } = useQuery({
+  const stateQuery = useQuery({
     queryKey: ["session-state", sessionId],
     queryFn: () => fetchSessionState(sessionId),
     refetchInterval: 5000,
@@ -65,17 +65,73 @@ export default function SessionDetailPage() {
 
   const unlockMut = useMutation({
     mutationFn: (cellId: string) => unlockCell(cellId),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] }),
-    onError: (e) => setError(extract(e)),
+    onSuccess: async (result) => {
+      setConfirmOpen(false);
+      setPendingCell(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["session-state", sessionId],
+      });
+      setEditing({
+        ...result.cell,
+        owner: result.cell.owner_id,
+        owner_id: result.cell.owner_id,
+        is_mine: true,
+        status: "unlocked",
+        locked_by_user_id: result.cell.owner_id,
+        comment: result.cell.comment,
+        revision: result.cell.revision,
+      });
+    },
+    onError: (e) => {
+      setConfirmOpen(false);
+      setError(extract(e));
+    },
   });
 
-  if (!state) {
+  if (stateQuery.isLoading) {
     return <Typography sx={{ p: 3 }}>Loading session…</Typography>;
   }
 
-  const { session, cells, completed_pct, available_unlocks, next_unlock_at } =
-    state;
+  if (stateQuery.isError || stateQuery.data == null) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert
+          severity="error"
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() =>
+                queryClient.invalidateQueries({
+                  queryKey: ["session-state", sessionId],
+                })
+              }
+            >
+              Retry
+            </Button>
+          }
+        >
+          Could not load session {sessionId}.{" "}
+          {stateQuery.error != null && extract(stateQuery.error)}
+        </Alert>
+        <Button component={RouterLink} to="/" sx={{ mt: 2 }}>
+          ← Back to sessions
+        </Button>
+      </Box>
+    );
+  }
+
+  const state = stateQuery.data;
+
+  const {
+    session,
+    cells,
+    completed_pct,
+    available_unlocks,
+    can_unlock: canUnlock,
+    next_unlock_at,
+    iteration,
+  } = state;
   const finished = session.status === "finished";
   const finishedModal = finished && !finishedDismissed && revealed.size === 0;
 
@@ -91,26 +147,30 @@ export default function SessionDetailPage() {
       return;
     }
 
-    const isMine = cell.owner !== null && cell.owner === myUserId;
+    const isMine = (cell.owner_id ?? cell.owner) === myUserId;
     if (!isMine) return;
 
-    if (cell.status === "filled") {
+    if (
+      cell.status === "unlocked" &&
+      cell.locked_by_user_id === myUserId
+    ) {
       setEditing(cell);
       return;
     }
 
     if (cell.status === "empty") {
+      if (!canUnlock) {
+        setError("You cannot unlock a cell right now.");
+        return;
+      }
       setPendingCell(cell);
       setConfirmOpen(true);
     }
   }
 
   async function confirmUnlock() {
-    if (pendingCell) {
-      await unlockMut.mutateAsync(pendingCell.id);
-      setPendingCell(null);
-    }
-    setConfirmOpen(false);
+    if (pendingCell == null) return;
+    await unlockMut.mutateAsync(pendingCell.id);
   }
 
   return (
@@ -166,6 +226,12 @@ export default function SessionDetailPage() {
         <Typography variant="body2">
           Unlocks available: {available_unlocks}
         </Typography>
+        {iteration && (
+          <Typography variant="body2" color="text.secondary">
+            Iteration {iteration.index} · {iteration.quota_used}/
+            {iteration.quota}
+          </Typography>
+        )}
         {next_unlock_at && (
           <Typography variant="body2" color="text.secondary">
             Next unlock: {new Date(next_unlock_at).toLocaleTimeString()}
@@ -232,8 +298,12 @@ export default function SessionDetailPage() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmOpen(false)}>Cancel</Button>
-          <Button onClick={confirmUnlock} variant="contained">
-            Unlock
+          <Button
+            onClick={confirmUnlock}
+            variant="contained"
+            disabled={unlockMut.isPending}
+          >
+            {unlockMut.isPending ? "Unlocking…" : "Unlock"}
           </Button>
         </DialogActions>
       </Dialog>

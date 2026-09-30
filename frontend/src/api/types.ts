@@ -51,10 +51,17 @@ export interface CellDTO {
   id: string;
   row: number;
   col: number;
+  /** Owner user id, or null for an unassigned cell. */
   owner: number | null;
+  /** Mirrors ``owner``; provided by the backend state endpoint. */
+  owner_id: number | null;
+  /** Whether the requesting user owns this cell. */
+  is_mine: boolean;
   status: CellStatus;
   locked_by_user_id: number | null;
   comment: string | null;
+  /** Current history revision, needed for autosave/commit requests. */
+  revision?: number;
 }
 
 export interface IterationDTO {
@@ -75,6 +82,16 @@ export interface SessionStateDTO {
   available_unlocks: number;
   completed_pct: number;
   next_unlock_at: string | null;
+  version?: number;
+  status?: SessionStatus;
+  progress?: { filled: number; total: number; percent: number };
+}
+
+/** Session lists grouped by lifecycle status. */
+export interface MySessionsResponse {
+  drafts: SessionDTO[];
+  active: SessionDTO[];
+  finished: SessionDTO[];
 }
 
 export interface PublicConfig {

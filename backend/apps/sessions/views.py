@@ -8,7 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.common.enums import CellStatus, SessionStatus
+from apps.common.enums import CellStatus, IterationState, SessionStatus
 from apps.common.errors import ConflictError, NotFoundError, PermissionDeniedError
 from apps.common.permissions import IsAdmin
 from apps.sessions.models import GameSession, SessionPlayer
@@ -336,19 +336,20 @@ class SessionStateView(APIView):
     """Expose a polling-friendly snapshot of the session state."""
 
     def get(self, request: Request, session_id: int) -> Response:
-        """Return the session state and a redacted cell summary.
+        """Return the session, cells, iteration and unlock information.
 
         Args:
             request: The current request.
             session_id: Session primary key.
 
         Returns:
-            A response with version, status and per-cell visibility.
+            A response with the serialized session, per-cell visibility, the
+            current iteration, unlock availability and progress percentage.
         """
         session = _get_session(session_id, request.user)
-        cells = session.cells.all()
-        total = cells.count()
-        filled = cells.filter(status=CellStatus.FILLED).count()
+        cells = list(session.cells.all())
+        total = len(cells)
+        filled = sum(1 for cell in cells if cell.status == CellStatus.FILLED)
 
         cells_payload = [
             {
@@ -356,15 +357,29 @@ class SessionStateView(APIView):
                 "row": cell.row,
                 "col": cell.col,
                 "status": cell.status,
+                "owner": cell.owner_id,
                 "owner_id": cell.owner_id,
+                "locked_by_user_id": cell.locked_by_id,
+                "comment": cell.comment or None,
                 "is_mine": cell.owner_id == request.user.id,
                 "has_comment": bool(cell.comment),
             }
             for cell in cells
         ]
 
+        iteration_payload, available_unlocks, can_unlock, next_unlock_at = (
+            _unlock_state(session, request.user)
+        )
+
         return Response(
             {
+                "session": SessionSerializer(session).data,
+                "cells": cells_payload,
+                "iteration": iteration_payload,
+                "can_unlock": can_unlock,
+                "available_unlocks": available_unlocks,
+                "completed_pct": round(filled / total * 100, 2) if total else 0.0,
+                "next_unlock_at": next_unlock_at,
                 "version": session.version,
                 "status": session.status,
                 "progress": {
@@ -372,6 +387,53 @@ class SessionStateView(APIView):
                     "total": total,
                     "percent": round(filled / total * 100, 2) if total else 0.0,
                 },
-                "cells": cells_payload,
             }
         )
+
+
+def _unlock_state(session, user) -> tuple[dict | None, int, bool, str | None]:
+    """Compute the current iteration and the caller's unlock availability.
+
+    Args:
+        session: The session being inspected.
+        user: The requesting player.
+
+    Returns:
+        A tuple of the iteration payload (or ``None``), the number of
+        remaining unlocks, whether the caller may unlock right now and the
+        ISO timestamp when the iteration timer ends.
+    """
+    iteration = (
+        session.iterations.filter(state=IterationState.ACTIVE).first()
+        or session.iterations.order_by("-index").first()
+    )
+    if iteration is None:
+        return None, 0, False, None
+
+    progress = iteration.progress.filter(user=user).first()
+    filled_count = progress.filled_count if progress else 0
+    available = max(0, session.unlock_quota - filled_count)
+
+    has_unlocked_cell = session.cells.filter(
+        locked_by=user, status=CellStatus.UNLOCKED
+    ).exists()
+    can_unlock = (
+        session.status == SessionStatus.ACTIVE
+        and iteration.state == IterationState.ACTIVE
+        and available > 0
+        and not has_unlocked_cell
+    )
+
+    iteration_payload = {
+        "id": iteration.id,
+        "index": iteration.index,
+        "state": iteration.state,
+        "started_at": iteration.started_at.isoformat(),
+        "finished_at": (
+            iteration.finished_at.isoformat() if iteration.finished_at else None
+        ),
+        "quota": session.unlock_quota,
+        "quota_used": filled_count,
+    }
+    next_unlock_at = iteration.ends_at.isoformat() if iteration.ends_at else None
+    return iteration_payload, available, can_unlock, next_unlock_at

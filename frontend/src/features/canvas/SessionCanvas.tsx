@@ -47,6 +47,10 @@ export default function SessionCanvas({
         {cells.map((cell) => {
           const x = cell.col * cellW;
           const y = cell.row * cellH;
+          const ownerId = cell.owner_id ?? cell.owner;
+          const isMine =
+            myUserId != null &&
+            (cell.is_mine === true || ownerId === myUserId);
 
           let fill = STATUS_FILL[cell.status] ?? "#ffffff";
 
@@ -58,17 +62,12 @@ export default function SessionCanvas({
                 ? "#ffffff"
                 : "#f5f5f5"
               : "#212121";
-          } else if (cell.status === "empty" && cell.owner !== myUserId) {
+          } else if (cell.status === "empty" && !isMine) {
             // Other players' unfinished cells are black.
             fill = "#212121";
-          } else if (
-            cell.status === "empty" &&
-            cell.owner === myUserId
-          ) {
+          } else if (cell.status === "empty" && isMine) {
             fill = "#9e9e9e";
           }
-
-          const isMine = cell.owner === myUserId;
 
           return (
             <g key={cell.id}>

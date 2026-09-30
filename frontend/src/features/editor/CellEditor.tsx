@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Box,
   Button,
   ButtonGroup,
@@ -12,7 +13,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { Circle, Line, Rect, Stage, Layer } from "react-konva";
+import { Layer, Line, Rect, Stage } from "react-konva";
 import type Konva from "konva";
 import type { CellDTO, DrawOperation, SessionDTO } from "../../api/types";
 import { autosaveCell, commitCell } from "../../api/cells";
@@ -26,6 +27,13 @@ interface Props {
   onCommitted: () => void;
 }
 
+interface Stroke {
+  points: number[];
+  color: string;
+  size: number;
+  erase: boolean;
+}
+
 const PALETTE = [
   "#000000",
   "#ffffff",
@@ -37,120 +45,152 @@ const PALETTE = [
   "#9c27b0",
 ];
 
+const AUTOSAVE_INTERVAL_MS = 10_000;
+
+/** Draw the rendered strokes described by a history snapshot. */
+function strokesFromHistory(
+  operations: DrawOperation[],
+  cellWidth: number,
+  cellHeight: number,
+): Stroke[] {
+  const result: Stroke[] = [];
+  for (const operation of operations) {
+    if (operation.type === "clear") {
+      result.length = 0;
+      continue;
+    }
+    if (operation.type !== "stroke" && operation.type !== "erase") {
+      continue;
+    }
+    const points = (operation.points ?? []).flatMap(([x, y]) => [
+      x * cellWidth,
+      y * cellHeight,
+    ]);
+    result.push({
+      points,
+      color: operation.color ?? "#000000",
+      size: (operation.size ?? 0.01) * cellWidth,
+      erase: operation.type === "erase",
+    });
+  }
+  return result;
+}
+
 /**
- * Single-cell drawing editor with brush/eraser, undo-redo, autosave and a
- * final irreversible commit.
+ * Single-cell drawing editor with brush/eraser, client-side undo/redo,
+ * periodic autosave and an irreversible final commit.
  */
-export default function CellEditor({ cell, session, onClose, onCommitted }: Props) {
+export default function CellEditor({
+  cell,
+  session,
+  onClose,
+  onCommitted,
+}: Props) {
+  const cellWidth = session.canvas_width / session.grid_cols;
+  const cellHeight = session.canvas_height / session.grid_rows;
+
   const [tool, setTool] = useState<Tool>("brush");
   const [color, setColor] = useState("#000000");
   const [size, setSize] = useState(4);
-  const [comment, setComment] = useState("");
+  const [comment, setComment] = useState(cell.comment ?? "");
   const [commitOpen, setCommitOpen] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [history, setHistory] = useState<DrawOperation[]>([]);
   const [redoStack, setRedoStack] = useState<DrawOperation[]>([]);
-  const [lines, setLines] = useState<
-    Array<{ points: number[]; color: string; size: number; erase: boolean }>
-  >([]);
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [revision, setRevision] = useState(cell.revision ?? 0);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">(
+    "idle",
+  );
+  const [error, setError] = useState<string | null>(null);
 
   const stageRef = useRef<Konva.Stage>(null);
-  const cellW = session.canvas_width / session.grid_cols;
-  const cellH = session.canvas_height / session.grid_rows;
+  const revisionRef = useRef(revision);
 
-  // Undo/redo keyboard shortcuts.
+  revisionRef.current = revision;
+
+  const undo = useCallback(() => {
+    setHistory((current) => {
+      if (current.length === 0) return current;
+      const last = current[current.length - 1];
+      setRedoStack((stack) => [...stack, last]);
+      const next = current.slice(0, -1);
+      setStrokes(strokesFromHistory(next, cellWidth, cellHeight));
+      return next;
+    });
+  }, [cellHeight, cellWidth]);
+
+  const redo = useCallback(() => {
+    setRedoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const last = stack[stack.length - 1];
+      setHistory((current) => {
+        const next = [...current, last];
+        setStrokes(strokesFromHistory(next, cellWidth, cellHeight));
+        return next;
+      });
+      return stack.slice(0, -1);
+    });
+  }, [cellHeight, cellWidth]);
+
   useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
-        e.preventDefault();
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z") {
+        event.preventDefault();
         undo();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
-        e.preventDefault();
+      } else if (key === "y") {
+        event.preventDefault();
         redo();
       }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [redo, undo]);
 
-  // Autosave the intermediate history on the configured interval.
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (history.length > 0) {
-        void autosaveCell(cell.id, history);
-      }
-    }, 10000);
-    return () => clearInterval(timer);
-  }, [history, cell.id]);
-
-  function pushOp(op: DrawOperation) {
-    setHistory((h) => [...h, op]);
-    setRedoStack([]);
-  }
-
-  function undo() {
-    setHistory((h) => {
-      if (h.length === 0) return h;
-      const last = h[h.length - 1];
-      setRedoStack((r) => [...r, last]);
-      rebuild(h.slice(0, -1));
-      return h.slice(0, -1);
-    });
-  }
-
-  function redo() {
-    setRedoStack((r) => {
-      if (r.length === 0) return r;
-      const last = r[r.length - 1];
-      setHistory((h) => {
-        const next = [...h, last];
-        rebuild(next);
-        return next;
-      });
-      return r.slice(0, -1);
-    });
-  }
-
-  /** Recompute the visible strokes from a history snapshot. */
-  function rebuild(ops: DrawOperation[]) {
-    const result: typeof lines = [];
-    for (const op of ops) {
-      if (op.type === "clear") {
-        result.length = 0;
-        continue;
-      }
-      if (op.type === "stroke" || op.type === "erase") {
-        result.push({
-          points: (op.points ?? []).flatMap(([x, y]) => [
-            x * cellW,
-            y * cellH,
-          ]),
-          color: op.color ?? "#000000",
-          size: (op.size ?? 0.01) * cellW,
-          erase: op.type === "erase",
-        });
-      }
+  /** Persist the current history without changing the drawing buffer. */
+  const save = useCallback(async () => {
+    if (history.length === 0) return;
+    setSaveState("saving");
+    try {
+      const result = await autosaveCell(
+        cell.id,
+        history,
+        revisionRef.current,
+      );
+      setRevision(result.revision);
+      revisionRef.current = result.revision;
+      setSaveState("saved");
+      setError(null);
+    } catch (err) {
+      setSaveState("idle");
+      setError(extractMessage(err));
     }
-    setLines(result);
-  }
+  }, [cell.id, history]);
 
-  function getRelativePointerPosition(): { x: number; y: number } | null {
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void save();
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [save]);
+
+  function pointerPosition(): { x: number; y: number } | null {
     const stage = stageRef.current;
-    if (!stage) return null;
-    const p = stage.getPointerPosition();
-    if (!p) return null;
-    return { x: p.x / cellW, y: p.y / cellH };
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) return null;
+    return { x: pointer.x, y: pointer.y };
   }
 
   function handleMouseDown() {
-    const p = getRelativePointerPosition();
-    if (!p) return;
+    const point = pointerPosition();
+    if (!point) return;
     setIsDrawing(true);
-    setLines((l) => [
-      ...l,
+    setStrokes((current) => [
+      ...current,
       {
-        points: [p.x * cellW, p.y * cellH],
+        points: [point.x, point.y],
         color,
         size,
         erase: tool === "eraser",
@@ -160,13 +200,14 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
 
   function handleMouseMove() {
     if (!isDrawing) return;
-    const p = getRelativePointerPosition();
-    if (!p) return;
-    setLines((l) => {
-      const next = [...l];
-      const current = { ...next[next.length - 1] };
-      current.points = [...current.points, p.x * cellW, p.y * cellH];
-      next[next.length - 1] = current;
+    const point = pointerPosition();
+    if (!point) return;
+    setStrokes((current) => {
+      if (current.length === 0) return current;
+      const next = [...current];
+      const last = { ...next[next.length - 1] };
+      last.points = [...last.points, point.x, point.y];
+      next[next.length - 1] = last;
       return next;
     });
   }
@@ -174,27 +215,44 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
   function handleMouseUp() {
     if (!isDrawing) return;
     setIsDrawing(false);
-    const last = lines[lines.length - 1];
-    if (!last) return;
-    // Convert pixel points back to normalized coordinates.
+    const last = strokes[strokes.length - 1];
+    if (!last || last.points.length < 4) return;
+
     const normalized: number[][] = [];
-    for (let i = 0; i < last.points.length; i += 2) {
-      normalized.push([last.points[i] / cellW, last.points[i + 1] / cellH]);
+    for (let index = 0; index < last.points.length; index += 2) {
+      normalized.push([
+        last.points[index] / cellWidth,
+        last.points[index + 1] / cellHeight,
+      ]);
     }
-    pushOp({
+    const operation: DrawOperation = {
       type: last.erase ? "erase" : "stroke",
       ts: Date.now(),
       color: last.color,
-      size: last.size / cellW,
+      size: last.size / cellWidth,
       points: normalized,
-    });
+    };
+    setHistory((current) => [...current, operation]);
+    setRedoStack([]);
   }
 
   async function handleCommit() {
-    await autosaveCell(cell.id, history);
-    await commitCell(cell.id, history, comment.trim() || undefined);
-    onCommitted();
+    setError(null);
+    try {
+      await commitCell(
+        cell.id,
+        history,
+        revisionRef.current,
+        comment.trim(),
+      );
+      setCommitOpen(false);
+      onCommitted();
+    } catch (err) {
+      setError(extractMessage(err));
+    }
   }
+
+  const canCommit = !error || saveState !== "idle";
 
   return (
     <Dialog open maxWidth="md" fullWidth onClose={onClose}>
@@ -204,7 +262,7 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
       <DialogContent>
         <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
           <Box>
-            <ButtonGroup sx={{ mb: 1 }}>
+            <ButtonGroup sx={{ mb: 1 }} variant="outlined">
               <Button
                 variant={tool === "brush" ? "contained" : "outlined"}
                 onClick={() => setTool("brush")}
@@ -225,21 +283,24 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
               </Button>
             </ButtonGroup>
 
-            <Box sx={{ display: "flex", gap: 1, mb: 1, alignItems: "center" }}>
-              {PALETTE.map((c) => (
-                <Tooltip key={c} title={c}>
+            <Box sx={{ display: "flex", gap: 1, mb: 2, alignItems: "center" }}>
+              {PALETTE.map((swatch) => (
+                <Tooltip key={swatch} title={swatch}>
                   <IconButton
                     size="small"
+                    aria-label={`color ${swatch}`}
                     onClick={() => {
-                      setColor(c);
+                      setColor(swatch);
                       setTool("brush");
                     }}
                     sx={{
                       width: 28,
                       height: 28,
-                      bgcolor: c,
+                      bgcolor: swatch,
                       border:
-                        color === c ? "3px solid #2196f3" : "1px solid #ccc",
+                        color === swatch
+                          ? "3px solid #2196f3"
+                          : "1px solid #cccccc",
                     }}
                   />
                 </Tooltip>
@@ -252,17 +313,18 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
               size="small"
               value={size}
               inputProps={{ min: 1, max: 40 }}
-              onChange={(e) => setSize(Number(e.target.value))}
-              sx={{ width: 140, mr: 2 }}
+              onChange={(event) => setSize(Number(event.target.value))}
+              sx={{ width: 140, mr: 2, mb: 2 }}
             />
 
             <Stage
               ref={stageRef}
-              width={cellW}
-              height={cellH}
+              width={cellWidth}
+              height={cellHeight}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
               onTouchStart={handleMouseDown}
               onTouchMove={handleMouseMove}
               onTouchEnd={handleMouseUp}
@@ -272,36 +334,35 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
                 <Rect
                   x={0}
                   y={0}
-                  width={cellW}
-                  height={cellH}
+                  width={cellWidth}
+                  height={cellHeight}
                   fill="#ffffff"
                   listening={false}
                 />
-                {lines.map((line, i) => (
+                {strokes.map((stroke, index) => (
                   <Line
-                    key={i}
-                    points={line.points}
-                    stroke={line.erase ? "#ffffff" : line.color}
-                    strokeWidth={line.size}
+                    key={index}
+                    points={stroke.points}
+                    stroke={stroke.erase ? "#ffffff" : stroke.color}
+                    strokeWidth={stroke.size}
                     lineCap="round"
                     lineJoin="round"
                     globalCompositeOperation={
-                      line.erase ? "destination-out" : "source-over"
+                      stroke.erase ? "destination-out" : "source-over"
                     }
                     tension={0.3}
                   />
                 ))}
-                <Circle x={0} y={0} radius={0} fill="transparent" />
               </Layer>
             </Stage>
           </Box>
 
           <Box sx={{ flex: 1, minWidth: 240 }}>
-            <Typography variant="subtitle2">Context</Typography>
-            <Typography variant="body2" color="text.secondary">
-              The read-only zone around this cell is shown on the session
-              canvas behind this dialog.
-            </Typography>
+            {error && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {error}
+              </Alert>
+            )}
 
             <TextField
               label="Comment (optional)"
@@ -309,18 +370,33 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
               minRows={3}
               fullWidth
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              sx={{ mt: 2 }}
+              onChange={(event) => setComment(event.target.value)}
+              helperText="Shown to other players as context."
             />
-            <Typography variant="caption" color="text.secondary">
-              {history.length} operations
+
+            <Typography variant="body2" sx={{ mt: 2 }}>
+              Operations: {history.length}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Revision: {revision}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {saveState === "saving"
+                ? "Saving…"
+                : saveState === "saved"
+                  ? "Saved"
+                  : `Autosaves every ${AUTOSAVE_INTERVAL_MS / 1000}s`}
             </Typography>
           </Box>
         </Box>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={() => setCommitOpen(true)}>
+        <Button
+          variant="contained"
+          onClick={() => setCommitOpen(true)}
+          disabled={!canCommit}
+        >
           Confirm
         </Button>
       </DialogActions>
@@ -329,21 +405,24 @@ export default function CellEditor({ cell, session, onClose, onCommitted }: Prop
         <DialogTitle>Commit this cell?</DialogTitle>
         <DialogContent>
           <Typography>
-            This action is irreversible. The cell will become read-only after
+            This action is irreversible. The cell becomes read-only after the
             confirmation.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCommitOpen(false)}>Back</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={handleCommit}
-          >
+          <Button variant="contained" color="error" onClick={handleCommit}>
             Commit
           </Button>
         </DialogActions>
       </Dialog>
     </Dialog>
   );
+}
+
+/** Extract a readable message from an API error. */
+function extractMessage(err: unknown): string {
+  const data = (err as { response?: { data?: { detail?: string } } })?.response
+    ?.data;
+  return data?.detail ?? "The request failed.";
 }
