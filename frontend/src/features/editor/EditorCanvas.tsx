@@ -8,6 +8,7 @@ import {
   type RenderedStroke,
 } from "../../shared/renderHistory";
 import ContextOverlay, {
+  ContextBoundary,
   type ContextCellView,
   type ContextShapeView,
 } from "./ContextOverlay";
@@ -30,6 +31,8 @@ interface Props {
   tool: EditorTool;
   color: string;
   size: number;
+  /** Draw the grey dashed context-area outline on the edited cell. */
+  showContextArea: boolean;
   onStrokeComplete: (operation: DrawOperation) => void;
   onHoverContext: (cellId: string | null) => void;
 }
@@ -68,6 +71,7 @@ export default function EditorCanvas({
   tool,
   color,
   size,
+  showContextArea,
   onStrokeComplete,
   onHoverContext,
 }: Props) {
@@ -80,13 +84,25 @@ export default function EditorCanvas({
 
   const zoneWidth = contextCols * cellWidth;
   const zoneHeight = contextRows * cellHeight;
+  const cellOffsetX = (cellCol - originCol) * cellWidth;
+  const cellOffsetY = (cellRow - originRow) * cellHeight;
+
+  // Fit the working area (the editable cell plus its context zone) into the
+  // viewport while keeping the edited cell centred. The required extent is
+  // measured from the cell centre to the farthest zone edge on each axis, so
+  // the whole zone stays visible. There is no upper clamp on purpose: the
+  // grey backdrop simply extends beyond the viewport and is clipped by the
+  // container.
+  const cellCentreX = cellOffsetX + cellWidth / 2;
+  const cellCentreY = cellOffsetY + cellHeight / 2;
+  const requiredWidth = 2 * Math.max(cellCentreX, zoneWidth - cellCentreX);
+  const requiredHeight = 2 * Math.max(cellCentreY, zoneHeight - cellCentreY);
   const scale = Math.min(
-    viewport.width / zoneWidth,
-    viewport.height / zoneHeight,
-    1,
+    viewport.width / requiredWidth,
+    viewport.height / requiredHeight,
   );
-  const offsetX = (viewport.width - zoneWidth * scale) / 2;
-  const offsetY = (viewport.height - zoneHeight * scale) / 2;
+  const offsetX = viewport.width / 2 - cellCentreX * scale;
+  const offsetY = viewport.height / 2 - cellCentreY * scale;
 
   useEffect(() => {
     const element = containerRef.current;
@@ -100,9 +116,6 @@ export default function EditorCanvas({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
-
-  const cellOffsetX = (cellCol - originCol) * cellWidth;
-  const cellOffsetY = (cellRow - originRow) * cellHeight;
 
   const strokes = strokesFromHistory(history, cellWidth, cellHeight);
   const draftStroke: RenderedStroke | null = draft
@@ -249,6 +262,19 @@ export default function EditorCanvas({
               listening={false}
             />
           )}
+          {/* Grey dashed context-area outline, always on top of the cell. */}
+          <ContextBoundary
+            cellWidth={cellWidth}
+            cellHeight={cellHeight}
+            cellRow={cellRow}
+            cellCol={cellCol}
+            originRow={originRow}
+            originCol={originCol}
+            shape={contextShape}
+            cells={contextCells}
+            showAll={showContextArea}
+            hoveredCellId={hoveredCellId}
+          />
         </Layer>
       </Stage>
     </Box>

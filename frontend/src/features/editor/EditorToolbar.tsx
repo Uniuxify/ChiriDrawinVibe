@@ -1,4 +1,12 @@
-import { Box, Button, Slider, Tooltip, Typography } from "@mui/material";
+import {
+  Box,
+  Button,
+  FormControlLabel,
+  Slider,
+  Switch,
+  Tooltip,
+  Typography,
+} from "@mui/material";
 
 export type EditorTool = "brush" | "eraser";
 
@@ -12,6 +20,9 @@ interface Props {
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
+  /** Outline the part of the cell neighbours will receive as context. */
+  showContextArea: boolean;
+  onContextAreaChange: (show: boolean) => void;
 }
 
 /** Vertical tool rail rendered on the left edge of the editor page. */
@@ -25,6 +36,8 @@ export default function EditorToolbar({
   onUndo,
   onRedo,
   onClear,
+  showContextArea,
+  onContextAreaChange,
 }: Props) {
   return (
     <Box
@@ -85,6 +98,27 @@ export default function EditorToolbar({
         <Button onClick={onClear} fullWidth color="warning">
           Clear
         </Button>
+      </Tooltip>
+
+      <Tooltip
+        title="Outline the part of this cell that neighbours receive as context. Off: outlines appear only for the hovered neighbour."
+        placement="right"
+      >
+        <FormControlLabel
+          sx={{ m: 0, alignItems: "flex-start" }}
+          control={
+            <Switch
+              checked={showContextArea}
+              onChange={(e) => onContextAreaChange(e.target.checked)}
+              size="small"
+            />
+          }
+          label={
+            <Typography variant="caption" color="text.secondary">
+              Context area
+            </Typography>
+          }
+        />
       </Tooltip>
     </Box>
   );

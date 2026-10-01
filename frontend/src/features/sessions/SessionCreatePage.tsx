@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -16,12 +16,18 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { createSession, fetchConfig } from "../../api/sessions";
+import {
+  createSession,
+  fetchConfig,
+  fetchMySessions,
+  joinSession,
+} from "../../api/sessions";
 import type {
   ContextShape,
   DistributionStrategy,
 } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
+import { debug } from "../../shared/debug";
 import type { CellGeometry } from "../../shared/contextGeometry";
 import {
   SLIDER_STEP,
@@ -31,6 +37,9 @@ import {
 } from "../../shared/contextGeometry";
 import ContextPreview from "./ContextPreview";
 import ContextRadiusScale from "./ContextRadiusScale";
+import { useAuthStore } from "../../store/auth";
+
+const log = debug("sessions:create");
 
 /**
  * Raw form state. Numeric fields are kept as strings so the user can clear
@@ -38,8 +47,9 @@ import ContextRadiusScale from "./ContextRadiusScale";
  */
 interface FormState {
   name: string;
-  canvas_width: string;
-  canvas_height: string;
+  /** Size of a single cell in pixels; the canvas is cell x grid. */
+  cell_width: string;
+  cell_height: string;
   grid_cols: string;
   grid_rows: string;
   players_count: string;
@@ -53,8 +63,8 @@ interface FormState {
 
 const initial: FormState = {
   name: "",
-  canvas_width: "512",
-  canvas_height: "512",
+  cell_width: "128",
+  cell_height: "128",
   grid_cols: "4",
   grid_rows: "4",
   players_count: "2",
@@ -72,13 +82,40 @@ interface NumberRule {
   max?: number;
 }
 
-/** Pixels per cell, guarding against empty or invalid form input. */
-function cellPixels(size: number, cells: number): number {
-  if (!Number.isFinite(size) || !Number.isFinite(cells) || cells <= 0) {
-    return 1;
-  }
-  const value = size / cells;
+/** A positive pixel size, guarding against empty or invalid form input. */
+function positivePixels(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
+/** Validate a cell size so that cells x grid stays inside the canvas limits. */
+function validateCell(
+  raw: string,
+  cellsRaw: string,
+  minCanvas: number,
+  maxCanvas: number,
+): string | null {
+  if (raw.trim() === "") {
+    return "This field is required.";
+  }
+  const value = Number(raw);
+  if (Number.isNaN(value)) {
+    return "Enter a valid number.";
+  }
+  if (value < 1) {
+    return "The value must be at least 1.";
+  }
+  const cells = Number(cellsRaw);
+  const canvas = Number.isFinite(cells) ? value * cells : Number.NaN;
+  if (Number.isNaN(canvas)) {
+    return "Enter a valid number.";
+  }
+  if (canvas < minCanvas) {
+    return `Canvas must be at least ${minCanvas} px.`;
+  }
+  if (canvas > maxCanvas) {
+    return `Canvas must be at most ${maxCanvas} px.`;
+  }
+  return null;
 }
 
 /** Admin form for creating a new drawing session. */
@@ -86,13 +123,36 @@ export default function SessionCreatePage() {
   const [form, setForm] = useState<FormState>(initial);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nameTouched, setNameTouched] = useState(false);
+  const [joinOnCreate, setJoinOnCreate] = useState(true);
   const navigate = useNavigate();
+  const username = useAuthStore((s) => s.username);
 
   const { data: config } = useQuery({
     queryKey: ["config"],
     queryFn: fetchConfig,
     staleTime: Infinity,
   });
+
+  const { data: mySessions } = useQuery({
+    queryKey: ["sessions", "mine"],
+    queryFn: fetchMySessions,
+    staleTime: 60_000,
+  });
+
+  // Suggest "<user>'s session #<n>" until the user edits the field, where n
+  // is one past the number of sessions they already have.
+  useEffect(() => {
+    if (nameTouched || form.name !== "" || !username || !mySessions) return;
+    const total =
+      mySessions.drafts.length +
+      mySessions.active.length +
+      mySessions.finished.length;
+    setForm((f) => ({
+      ...f,
+      name: f.name === "" ? `${username}'s session #${total + 1}` : f.name,
+    }));
+  }, [form.name, mySessions, nameTouched, username]);
 
   const minSize = config?.min_canvas_size ?? 100;
   const maxSize = config?.max_canvas_size ?? 10000;
@@ -141,11 +201,11 @@ export default function SessionCreatePage() {
   // Real cell pixels drive the preview, the count line and the slider magnet.
   const cellGeometry = useMemo<CellGeometry>(
     () => ({
-      width: cellPixels(Number(form.canvas_width), Number(form.grid_cols)),
-      height: cellPixels(Number(form.canvas_height), Number(form.grid_rows)),
+      width: positivePixels(Number(form.cell_width)),
+      height: positivePixels(Number(form.cell_height)),
       shape: "rectangle",
     }),
-    [form.canvas_width, form.canvas_height, form.grid_cols, form.grid_rows],
+    [form.cell_width, form.cell_height],
   );
   const thresholds = useMemo(
     () => contextThresholds(form.context_shape, cellGeometry),
@@ -156,9 +216,16 @@ export default function SessionCreatePage() {
     [form.context_shape, cellGeometry],
   );
 
+  const canvasWidthPx = Number(form.cell_width) * Number(form.grid_cols);
+  const canvasHeightPx = Number(form.cell_height) * Number(form.grid_rows);
+
   const errors: Partial<Record<keyof FormState, string>> = {
-    canvas_width: validateNumber(form.canvas_width, { min: minSize, max: maxSize }) ?? undefined,
-    canvas_height: validateNumber(form.canvas_height, { min: minSize, max: maxSize }) ?? undefined,
+    cell_width:
+      validateCell(form.cell_width, form.grid_cols, minSize, maxSize) ??
+      undefined,
+    cell_height:
+      validateCell(form.cell_height, form.grid_rows, minSize, maxSize) ??
+      undefined,
     grid_cols: validateNumber(form.grid_cols, { min: minGrid, max: maxGrid }) ?? undefined,
     grid_rows: validateNumber(form.grid_rows, { min: minGrid, max: maxGrid }) ?? undefined,
     players_count:
@@ -183,8 +250,8 @@ export default function SessionCreatePage() {
     try {
       const session = await createSession({
         name: form.name.trim(),
-        canvas_width: Number(form.canvas_width),
-        canvas_height: Number(form.canvas_height),
+        canvas_width: Number(form.cell_width) * Number(form.grid_cols),
+        canvas_height: Number(form.cell_height) * Number(form.grid_rows),
         grid_cols: Number(form.grid_cols),
         grid_rows: Number(form.grid_rows),
         players_count: Number(form.players_count),
@@ -196,6 +263,17 @@ export default function SessionCreatePage() {
         distribution_strategy: form.distribution_strategy,
         is_public: form.is_public,
       });
+      if (joinOnCreate) {
+        try {
+          await joinSession(session.join_code);
+        } catch (joinErr) {
+          // The session exists; failing to join it must not lose it.
+          log.log("Could not join the created session", {
+            sessionId: session.id,
+            error: extractApiMessage(joinErr),
+          });
+        }
+      }
       navigate(`/sessions/${session.id}`);
     } catch (err) {
       setError(extractApiMessage(err, "Could not create the session."));
@@ -219,7 +297,10 @@ export default function SessionCreatePage() {
         <TextField
           label="Name"
           value={form.name}
-          onChange={(e) => update("name", e.target.value)}
+          onChange={(e) => {
+            setNameTouched(true);
+            update("name", e.target.value);
+          }}
           error={Boolean(errors.name)}
           helperText={errors.name}
           required
@@ -227,25 +308,25 @@ export default function SessionCreatePage() {
 
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2 }}>
           <TextField
-            label="Canvas width (px)"
+            label="Cell width (px)"
             type="number"
-            value={form.canvas_width}
-            inputProps={{ min: minSize, max: maxSize }}
-            onChange={(e) => update("canvas_width", e.target.value)}
-            onBlur={() => onNumberBlur("canvas_width")}
-            error={Boolean(errors.canvas_width)}
-            helperText={errors.canvas_width}
+            value={form.cell_width}
+            inputProps={{ min: 1 }}
+            onChange={(e) => update("cell_width", e.target.value)}
+            onBlur={() => onNumberBlur("cell_width")}
+            error={Boolean(errors.cell_width)}
+            helperText={errors.cell_width ?? `Canvas: ${canvasWidthPx} px`}
             required
           />
           <TextField
-            label="Canvas height (px)"
+            label="Cell height (px)"
             type="number"
-            value={form.canvas_height}
-            inputProps={{ min: minSize, max: maxSize }}
-            onChange={(e) => update("canvas_height", e.target.value)}
-            onBlur={() => onNumberBlur("canvas_height")}
-            error={Boolean(errors.canvas_height)}
-            helperText={errors.canvas_height}
+            value={form.cell_height}
+            inputProps={{ min: 1 }}
+            onChange={(e) => update("cell_height", e.target.value)}
+            onBlur={() => onNumberBlur("cell_height")}
+            error={Boolean(errors.cell_height)}
+            helperText={errors.cell_height ?? `Canvas: ${canvasHeightPx} px`}
             required
           />
           <TextField
@@ -380,6 +461,16 @@ export default function SessionCreatePage() {
             />
           }
           label="Public"
+        />
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={joinOnCreate}
+              onChange={(e) => setJoinOnCreate(e.target.checked)}
+            />
+          }
+          label="Join session (add me as a player)"
         />
 
         <Stack direction="row" spacing={2}>

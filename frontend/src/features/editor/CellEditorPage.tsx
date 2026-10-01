@@ -48,6 +48,7 @@ export default function CellEditorPage() {
   const [tool, setTool] = useState<EditorTool>("brush");
   const [color, setColor] = useState("#000000");
   const [size, setSize] = useState(4);
+  const [showContextArea, setShowContextArea] = useState(true);
   const [history, setHistory] = useState<DrawOperation[]>([]);
   const [redoStack, setRedoStack] = useState<DrawOperation[]>([]);
   const [comment, setComment] = useState("");
@@ -377,6 +378,8 @@ export default function CellEditorPage() {
             setHistory([]);
             setRedoStack([]);
           }}
+          showContextArea={showContextArea}
+          onContextAreaChange={setShowContextArea}
         />
         <EditorCanvas
           cellWidth={cellWidth}
@@ -393,6 +396,7 @@ export default function CellEditorPage() {
           tool={tool}
           color={color}
           size={size}
+          showContextArea={showContextArea}
           onStrokeComplete={(operation) => {
             setHistory((current) => [...current, operation]);
             setRedoStack([]);

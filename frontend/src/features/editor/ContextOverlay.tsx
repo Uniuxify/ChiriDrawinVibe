@@ -1,4 +1,4 @@
-import { Group, Line, Rect, Text } from "react-konva";
+import { Ellipse, Group, Line, Rect, Text } from "react-konva";
 import type Konva from "konva";
 import type { RenderedStroke } from "../../shared/renderHistory";
 
@@ -235,6 +235,107 @@ export default function ContextOverlay({
         dash={[8, 5]}
         listening={false}
       />
+    </Group>
+  );
+}
+
+interface BoundaryProps {
+  cellWidth: number;
+  cellHeight: number;
+  /** Grid coordinates of the cell being edited. */
+  cellRow: number;
+  cellCol: number;
+  originRow: number;
+  originCol: number;
+  /** Figure every neighbour's context is cropped to, from the backend. */
+  shape: ContextShapeView | null;
+  cells: ContextCellView[];
+  /** Outline the context area for all neighbours, not just the hovered one. */
+  showAll: boolean;
+  /** Id of the neighbour currently hovered, if any. */
+  hoveredCellId: string | null;
+}
+
+const BOUNDARY_COLOR = "#757575";
+const BOUNDARY_DASH = [6, 4];
+
+/**
+ * Grey dashed outline of the part of the edited cell that ends up in the
+ * context of its neighbours.
+ *
+ * Each neighbour's context figure is centred on that neighbour; outlining it
+ * clipped to the edited cell yields exactly the slice of the cell that
+ * neighbour will see as context. With `showAll` the outlines of every
+ * neighbour are drawn (their union), otherwise only the hovered one.
+ */
+export function ContextBoundary({
+  cellWidth,
+  cellHeight,
+  cellRow,
+  cellCol,
+  originRow,
+  originCol,
+  shape,
+  cells,
+  showAll,
+  hoveredCellId,
+}: BoundaryProps) {
+  const kind = shape?.kind ?? "rectangle";
+  const halfW = shape?.halfWidth ?? (cellWidth / 2 || 1);
+  const halfH = shape?.halfHeight ?? (cellHeight / 2 || 1);
+
+  const targets = showAll
+    ? cells
+    : cells.filter((cell) => cell.cellId === hoveredCellId);
+  if (targets.length === 0) return null;
+
+  const cellX = (col: number) => (col - originCol) * cellWidth;
+  const cellY = (row: number) => (row - originRow) * cellHeight;
+  const editedX = cellX(cellCol);
+  const editedY = cellY(cellRow);
+
+  const clipToEditedCell = (ctx: Konva.Context) => {
+    ctx.beginPath();
+    ctx.rect(editedX, editedY, cellWidth, cellHeight);
+    ctx.closePath();
+  };
+
+  return (
+    <Group clipFunc={clipToEditedCell}>
+      {targets.map((cell) => {
+        const cx = cellX(cell.col) + cellWidth / 2;
+        const cy = cellY(cell.row) + cellHeight / 2;
+        if (kind === "circle") {
+          return (
+            <Ellipse
+              key={`boundary-${cell.cellId}`}
+              x={cx}
+              y={cy}
+              radiusX={halfW}
+              radiusY={halfH}
+              fill="none"
+              stroke={BOUNDARY_COLOR}
+              strokeWidth={2}
+              dash={BOUNDARY_DASH}
+              listening={false}
+            />
+          );
+        }
+        return (
+          <Rect
+            key={`boundary-${cell.cellId}`}
+            x={cx - halfW}
+            y={cy - halfH}
+            width={halfW * 2}
+            height={halfH * 2}
+            fill="none"
+            stroke={BOUNDARY_COLOR}
+            strokeWidth={2}
+            dash={BOUNDARY_DASH}
+            listening={false}
+          />
+        );
+      })}
     </Group>
   );
 }
