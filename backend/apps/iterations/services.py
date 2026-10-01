@@ -66,6 +66,11 @@ def _maybe_start_timer(iteration: Iteration, session: GameSession) -> None:
     """
     if iteration.timer_started_at is not None:
         return
+    if session.interval_seconds <= 0:
+        # A zero interval means there is no time pressure at all: the
+        # iteration advances only once every player has spent their quota, so
+        # no timer (and therefore no auto-commit) is ever started.
+        return
     iteration.timer_started_at = timezone.now()
     iteration.ends_at = iteration.timer_started_at + timedelta(
         seconds=session.interval_seconds

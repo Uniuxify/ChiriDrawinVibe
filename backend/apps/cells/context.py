@@ -8,9 +8,10 @@ centred on the unlocked cell. The radius is measured in cells:
 * ``circle`` draws a circle of that radius, so ``R = 0.5`` fits inside the
   cell.
 
-``min`` is the largest radius that still touches no neighbouring cell,
-``max`` is ``1.5`` (the far edge of an adjacent cell), and ``percent``
-interpolates between them.
+``min`` is the largest radius that still touches no neighbouring cell and
+``max`` is ``1.5`` (the far edge of an adjacent cell). New sessions use
+``percent``: the radius grows linearly from ``min`` at ``0%`` (the figure
+coincides with the cell) to ``MAX_RADIUS`` at ``100%``.
 
 A neighbour participates in the context as soon as its rectangle *intersects*
 the figure, which is what makes partially visible cells possible.

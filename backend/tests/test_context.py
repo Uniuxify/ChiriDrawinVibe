@@ -36,12 +36,28 @@ def test_max_radius_reaches_one_cell_further():
     assert (3, 3) not in result
 
 
-def test_percent_interpolates_between_min_and_max():
+def test_percent_reaches_orthogonal_but_not_diagonal():
     """A circle at 10 percent reaches orthogonal but not diagonal cells."""
     resolver = NeighborResolver(shape="circle", radius_mode="percent", radius_pct=10)
     assert math.isclose(resolver.effective_radius(), 0.6)
     result = resolver.resolve(row=3, col=3, grid_rows=7, grid_cols=7)
     assert result == [(2, 3), (3, 2), (3, 4), (4, 3)]
+
+
+def test_percent_zero_coincides_with_cell():
+    """A zero-percent radius makes the figure coincide with the cell."""
+    square = NeighborResolver(shape="rectangle", radius_mode="percent", radius_pct=0)
+    circle = NeighborResolver(shape="circle", radius_mode="percent", radius_pct=0)
+    assert math.isclose(square.effective_radius(), math.sqrt(2) / 2)
+    assert math.isclose(circle.effective_radius(), 0.5)
+    for resolver in (square, circle):
+        assert resolver.resolve(row=3, col=3, grid_rows=8, grid_cols=8) == []
+
+
+def test_percent_grows_linearly_to_max():
+    """The percent radius spans the full range up to the maximum."""
+    resolver = NeighborResolver(shape="circle", radius_mode="percent", radius_pct=100)
+    assert math.isclose(resolver.effective_radius(), 1.5)
 
 
 def test_partial_circle_includes_diagonal_at_mid_range():

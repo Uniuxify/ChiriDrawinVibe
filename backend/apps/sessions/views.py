@@ -77,6 +77,23 @@ def _require_owner(session: GameSession, user) -> None:
         raise PermissionDeniedError("Only the session owner may perform this action.")
 
 
+def _require_free_seat(session: GameSession) -> None:
+    """Ensure the session still has room for another player.
+
+    Args:
+        session: The session the player wants to join.
+
+    Raises:
+        ConflictError: If the session already holds its maximum of players.
+    """
+    joined = session.players.filter(is_active=True).count()
+    if joined >= session.players_count:
+        raise ConflictError(
+            "This session is full.",
+            details={"joined": joined, "max_players": session.players_count},
+        )
+
+
 class MySessionsView(APIView):
     """List sessions relevant to the caller in two buckets."""
 
@@ -223,6 +240,7 @@ class SessionPlayerView(APIView):
 
         if session.players.filter(user=user).exists():
             raise ConflictError("The user is already a participant.")
+        _require_free_seat(session)
 
         SessionPlayer.objects.create(session=session, user=user)
         session.touch()
@@ -283,6 +301,7 @@ class JoinSessionView(APIView):
             raise ConflictError("You can only join sessions in draft status.")
         if session.players.filter(user=request.user).exists():
             raise ConflictError("You have already joined this session.")
+        _require_free_seat(session)
 
         SessionPlayer.objects.create(session=session, user=request.user)
         session.touch()

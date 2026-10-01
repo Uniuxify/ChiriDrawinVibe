@@ -42,6 +42,7 @@ export default function SessionDetailPage() {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [pendingCell, setPendingCell] = useState<CellDTO | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [finishedDismissed, setFinishedDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -133,6 +134,22 @@ export default function SessionDetailPage() {
 
   function openEditor(cellId: string) {
     navigate(`/sessions/${sessionId}/cells/${cellId}`);
+  }
+
+  /**
+   * Start the session, asking for confirmation first when it is not full yet.
+   */
+  function handleStart() {
+    if (joinedCount < session.players_count) {
+      setStartConfirmOpen(true);
+      return;
+    }
+    startMut.mutate();
+  }
+
+  function confirmEarlyStart() {
+    setStartConfirmOpen(false);
+    startMut.mutate();
   }
 
   function handleSelect(cell: CellDTO) {
@@ -262,10 +279,10 @@ export default function SessionDetailPage() {
         {session.status === "draft" && isAdmin && (
           <Button
             variant="contained"
-            onClick={() => startMut.mutate()}
+            onClick={handleStart}
             disabled={startMut.isPending}
           >
-            Start session
+            {startMut.isPending ? "Starting…" : "Start session"}
           </Button>
         )}
         {session.status === "active" && isAdmin && (
@@ -295,7 +312,7 @@ export default function SessionDetailPage() {
             Grid: {session.grid_cols}×{session.grid_rows}
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Players: {joinedCount} / {session.players_count} joined
+            Players: {joinedCount} joined (max {session.players_count})
           </Typography>
           {joinedCount > 0 && (
             <Typography variant="body2" color="text.secondary">
@@ -304,7 +321,8 @@ export default function SessionDetailPage() {
           )}
           {session.status === "draft" && joinedCount < session.players_count && (
             <Typography variant="body2" color="warning.main">
-              Not enough players joined to start the session.
+              Not full yet ({joinedCount} of {session.players_count}) — you can
+              start early.
             </Typography>
           )}
           <Typography variant="body2" color="text.secondary">
@@ -339,6 +357,32 @@ export default function SessionDetailPage() {
             disabled={unlockMut.isPending}
           >
             {unlockMut.isPending ? "Unlocking…" : "Unlock"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Early start confirmation */}
+      <Dialog
+        open={startConfirmOpen}
+        onClose={() => setStartConfirmOpen(false)}
+      >
+        <DialogTitle>Start the session early?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The session is not full yet — {joinedCount} of{" "}
+            {session.players_count} players joined. Players who have not joined
+            yet will not be able to take part. Are you sure you want to start
+            early?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStartConfirmOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={confirmEarlyStart}
+            disabled={startMut.isPending}
+          >
+            {startMut.isPending ? "Starting…" : "Start early"}
           </Button>
         </DialogActions>
       </Dialog>

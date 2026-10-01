@@ -10,29 +10,34 @@ import {
   InputLabel,
   MenuItem,
   Select,
+  Slider,
+  Stack,
   Switch,
   TextField,
   Typography,
 } from "@mui/material";
 import { createSession, fetchConfig } from "../../api/sessions";
 import type {
-  ContextRadiusMode,
   ContextShape,
   DistributionStrategy,
 } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
+import ContextPreview from "./ContextPreview";
 
+/**
+ * Raw form state. Numeric fields are kept as strings so the user can clear
+ * them completely while editing; they are parsed on submit.
+ */
 interface FormState {
   name: string;
-  canvas_width: number;
-  canvas_height: number;
-  grid_cols: number;
-  grid_rows: number;
-  players_count: number;
-  interval_seconds: number;
-  unlock_quota: number;
+  canvas_width: string;
+  canvas_height: string;
+  grid_cols: string;
+  grid_rows: string;
+  players_count: string;
+  interval_seconds: string;
+  unlock_quota: string;
   context_shape: ContextShape;
-  context_radius_mode: ContextRadiusMode;
   context_radius_pct: number;
   distribution_strategy: DistributionStrategy;
   is_public: boolean;
@@ -40,19 +45,24 @@ interface FormState {
 
 const initial: FormState = {
   name: "",
-  canvas_width: 512,
-  canvas_height: 512,
-  grid_cols: 4,
-  grid_rows: 4,
-  players_count: 2,
-  interval_seconds: 86400,
-  unlock_quota: 1,
+  canvas_width: "512",
+  canvas_height: "512",
+  grid_cols: "4",
+  grid_rows: "4",
+  players_count: "2",
+  interval_seconds: "86400",
+  unlock_quota: "1",
   context_shape: "rectangle",
-  context_radius_mode: "min",
   context_radius_pct: 0,
   distribution_strategy: "random",
   is_public: false,
 };
+
+/** A field validated as a number with an optional inclusive range. */
+interface NumberRule {
+  min: number;
+  max?: number;
+}
 
 /** Admin form for creating a new drawing session. */
 export default function SessionCreatePage() {
@@ -67,16 +77,90 @@ export default function SessionCreatePage() {
     staleTime: Infinity,
   });
 
+  const minSize = config?.min_canvas_size ?? 100;
+  const maxSize = config?.max_canvas_size ?? 10000;
+  const minGrid = config?.min_grid ?? 2;
+  const maxGrid = config?.max_grid ?? 100;
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  /** Replace an empty numeric field with "0" when it loses focus. */
+  function onNumberBlur(key: keyof FormState) {
+    setForm((f) => {
+      const value = f[key];
+      if (typeof value === "string" && value.trim() === "") {
+        return { ...f, [key]: "0" };
+      }
+      return f;
+    });
+  }
+
+  /** Validate a numeric field, returning an error message or null. */
+  function validateNumber(
+    raw: string,
+    { min, max }: NumberRule,
+  ): string | null {
+    if (raw.trim() === "") {
+      return "This field is required.";
+    }
+    const value = Number(raw);
+    if (Number.isNaN(value)) {
+      return "Enter a valid number.";
+    }
+    if (value < min) {
+      return `The value must be at least ${min}.`;
+    }
+    if (max !== undefined && value > max) {
+      return `The value must be at most ${max}.`;
+    }
+    return null;
+  }
+
+  const cellCount =
+    Number(form.grid_cols) * Number(form.grid_rows) || undefined;
+
+  const errors: Partial<Record<keyof FormState, string>> = {
+    canvas_width: validateNumber(form.canvas_width, { min: minSize, max: maxSize }) ?? undefined,
+    canvas_height: validateNumber(form.canvas_height, { min: minSize, max: maxSize }) ?? undefined,
+    grid_cols: validateNumber(form.grid_cols, { min: minGrid, max: maxGrid }) ?? undefined,
+    grid_rows: validateNumber(form.grid_rows, { min: minGrid, max: maxGrid }) ?? undefined,
+    players_count:
+      validateNumber(form.players_count, { min: 1, max: cellCount }) ?? undefined,
+    interval_seconds:
+      validateNumber(form.interval_seconds, { min: 0 }) ?? undefined,
+    unlock_quota: validateNumber(form.unlock_quota, { min: 1 }) ?? undefined,
+  };
+
+  const nameError = form.name.trim() === "" ? "Name is required." : undefined;
+  if (nameError) errors.name = nameError;
+
+  // Count only fields that actually have an error. Using Object.keys() here
+  // would always report an error because every key exists (with undefined).
+  const hasErrors = Object.values(errors).some(Boolean);
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    if (hasErrors) return;
     setLoading(true);
     try {
-      const session = await createSession(form);
+      const session = await createSession({
+        name: form.name.trim(),
+        canvas_width: Number(form.canvas_width),
+        canvas_height: Number(form.canvas_height),
+        grid_cols: Number(form.grid_cols),
+        grid_rows: Number(form.grid_rows),
+        players_count: Number(form.players_count),
+        interval_seconds: Number(form.interval_seconds),
+        unlock_quota: Number(form.unlock_quota),
+        context_shape: form.context_shape,
+        context_radius_mode: "percent",
+        context_radius_pct: form.context_radius_pct,
+        distribution_strategy: form.distribution_strategy,
+        is_public: form.is_public,
+      });
       navigate(`/sessions/${session.id}`);
     } catch (err) {
       setError(extractApiMessage(err, "Could not create the session."));
@@ -85,13 +169,8 @@ export default function SessionCreatePage() {
     }
   }
 
-  const minSize = config?.min_canvas_size ?? 100;
-  const maxSize = config?.max_canvas_size ?? 10000;
-  const minGrid = config?.min_grid ?? 2;
-  const maxGrid = config?.max_grid ?? 100;
-
   return (
-    <Box sx={{ maxWidth: 640, mx: "auto", p: 3 }}>
+    <Box sx={{ maxWidth: 720, mx: "auto", p: 3 }}>
       <Typography variant="h5" gutterBottom>
         New session
       </Typography>
@@ -106,6 +185,8 @@ export default function SessionCreatePage() {
           label="Name"
           value={form.name}
           onChange={(e) => update("name", e.target.value)}
+          error={Boolean(errors.name)}
+          helperText={errors.name}
           required
         />
 
@@ -115,7 +196,10 @@ export default function SessionCreatePage() {
             type="number"
             value={form.canvas_width}
             inputProps={{ min: minSize, max: maxSize }}
-            onChange={(e) => update("canvas_width", Number(e.target.value))}
+            onChange={(e) => update("canvas_width", e.target.value)}
+            onBlur={() => onNumberBlur("canvas_width")}
+            error={Boolean(errors.canvas_width)}
+            helperText={errors.canvas_width}
             required
           />
           <TextField
@@ -123,7 +207,10 @@ export default function SessionCreatePage() {
             type="number"
             value={form.canvas_height}
             inputProps={{ min: minSize, max: maxSize }}
-            onChange={(e) => update("canvas_height", Number(e.target.value))}
+            onChange={(e) => update("canvas_height", e.target.value)}
+            onBlur={() => onNumberBlur("canvas_height")}
+            error={Boolean(errors.canvas_height)}
+            helperText={errors.canvas_height}
             required
           />
           <TextField
@@ -131,7 +218,10 @@ export default function SessionCreatePage() {
             type="number"
             value={form.grid_cols}
             inputProps={{ min: minGrid, max: maxGrid }}
-            onChange={(e) => update("grid_cols", Number(e.target.value))}
+            onChange={(e) => update("grid_cols", e.target.value)}
+            onBlur={() => onNumberBlur("grid_cols")}
+            error={Boolean(errors.grid_cols)}
+            helperText={errors.grid_cols}
             required
           />
           <TextField
@@ -139,23 +229,32 @@ export default function SessionCreatePage() {
             type="number"
             value={form.grid_rows}
             inputProps={{ min: minGrid, max: maxGrid }}
-            onChange={(e) => update("grid_rows", Number(e.target.value))}
+            onChange={(e) => update("grid_rows", e.target.value)}
+            onBlur={() => onNumberBlur("grid_rows")}
+            error={Boolean(errors.grid_rows)}
+            helperText={errors.grid_rows}
             required
           />
           <TextField
-            label="Players"
+            label="Max Players"
             type="number"
             value={form.players_count}
             inputProps={{ min: 1 }}
-            onChange={(e) => update("players_count", Number(e.target.value))}
+            onChange={(e) => update("players_count", e.target.value)}
+            onBlur={() => onNumberBlur("players_count")}
+            error={Boolean(errors.players_count)}
+            helperText={errors.players_count}
             required
           />
           <TextField
             label="Interval (seconds)"
             type="number"
             value={form.interval_seconds}
-            inputProps={{ min: 60 }}
-            onChange={(e) => update("interval_seconds", Number(e.target.value))}
+            inputProps={{ min: 0 }}
+            onChange={(e) => update("interval_seconds", e.target.value)}
+            onBlur={() => onNumberBlur("interval_seconds")}
+            error={Boolean(errors.interval_seconds)}
+            helperText={errors.interval_seconds ?? "0 waits for all players."}
             required
           />
           <TextField
@@ -163,7 +262,10 @@ export default function SessionCreatePage() {
             type="number"
             value={form.unlock_quota}
             inputProps={{ min: 1 }}
-            onChange={(e) => update("unlock_quota", Number(e.target.value))}
+            onChange={(e) => update("unlock_quota", e.target.value)}
+            onBlur={() => onNumberBlur("unlock_quota")}
+            error={Boolean(errors.unlock_quota)}
+            helperText={errors.unlock_quota}
             required
           />
         </Box>
@@ -181,33 +283,30 @@ export default function SessionCreatePage() {
           </Select>
         </FormControl>
 
-        <FormControl fullWidth>
-          <InputLabel id="radius-mode-label">Context radius</InputLabel>
-          <Select
-            labelId="radius-mode-label"
-            label="Context radius"
-            value={form.context_radius_mode}
-            onChange={(e) =>
-              update("context_radius_mode", e.target.value as ContextRadiusMode)
-            }
-          >
-            <MenuItem value="min">Min</MenuItem>
-            <MenuItem value="max">Max</MenuItem>
-            <MenuItem value="percent">Percent</MenuItem>
-          </Select>
-        </FormControl>
-
-        {form.context_radius_mode === "percent" && (
-          <TextField
-            label="Radius %"
-            type="number"
-            value={form.context_radius_pct}
-            inputProps={{ min: 0, max: 100 }}
-            onChange={(e) =>
-              update("context_radius_pct", Number(e.target.value))
-            }
+        <Box sx={{ display: "flex", gap: 3, alignItems: "center" }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2" color="text.secondary" gutterBottom>
+              Context radius: {form.context_radius_pct}%
+            </Typography>
+            <Slider
+              value={form.context_radius_pct}
+              onChange={(_, value) =>
+                update("context_radius_pct", value as number)
+              }
+              min={0}
+              max={100}
+              valueLabelDisplay="auto"
+              aria-label="Context radius percent"
+            />
+            <Typography variant="caption" color="text.secondary">
+              0% matches the cell; 100% reaches the neighbouring cells.
+            </Typography>
+          </Box>
+          <ContextPreview
+            shape={form.context_shape}
+            radiusPct={form.context_radius_pct}
           />
-        )}
+        </Box>
 
         <FormControl fullWidth>
           <InputLabel id="dist-label">Distribution</InputLabel>
@@ -237,14 +336,17 @@ export default function SessionCreatePage() {
           label="Public"
         />
 
-        <Box sx={{ display: "flex", gap: 2 }}>
-          <Button type="submit" variant="contained" disabled={loading}>
+        <Stack direction="row" spacing={2}>
+          <Button
+            type="submit"
+            variant="contained"
+            disabled={loading || hasErrors}
+          >
             {loading ? "Creating…" : "Create draft"}
           </Button>
           <Button onClick={() => navigate("/")}>Cancel</Button>
-        </Box>
+        </Stack>
       </Box>
     </Box>
   );
 }
-

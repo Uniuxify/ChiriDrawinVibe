@@ -55,6 +55,10 @@ def distribute_cells(session: GameSession) -> None:
 def start_session(session: GameSession) -> GameSession:
     """Start a draft session, distributing cells and creating iteration 0.
 
+    The session may be started before it is full (an early start); the client
+    is responsible for warning the owner. The only rejected player counts are
+    an empty session and an accidental overflow past the configured maximum.
+
     Args:
         session: The session to start.
 
@@ -63,16 +67,22 @@ def start_session(session: GameSession) -> GameSession:
 
     Raises:
         ConflictError: If the session is not in draft state or cells exist.
-        ValidationError: If the player count does not match the configuration.
+        ValidationError: If there are no players or more players than allowed.
     """
     locked = GameSession.objects.select_for_update().get(pk=session.pk)
     if locked.status != SessionStatus.DRAFT:
         raise ConflictError("Only draft sessions can be started.")
 
     joined = locked.players.filter(is_active=True).count()
-    if joined != locked.players_count:
+    if joined > locked.players_count:
         raise ValidationError(
-            f"Not enough players joined: {joined} of {locked.players_count} required.",
+            f"The session has more players than allowed: "
+            f"{joined} of {locked.players_count}.",
+            details={"joined": joined, "max_players": locked.players_count},
+        )
+    if joined == 0:
+        raise ValidationError(
+            f"Not enough players joined: 0 of {locked.players_count} required.",
             details={"joined": joined, "required": locked.players_count},
         )
 
