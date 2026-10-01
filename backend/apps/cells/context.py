@@ -1,17 +1,19 @@
 """Pure geometry helpers computing the read-only context around a cell.
 
-The context is the set of neighbouring cells whose rasters are shown to the
-player when they unlock a cell. Its shape and size are driven by the session
-configuration:
+The context is a figure inscribed in a circle of radius ``context_radius``
+centred on the unlocked cell. The radius is measured in cells:
 
-* ``context_shape`` chooses a rectangle or a circle.
-* ``context_radius_mode`` decides how ``context_radius_pct`` is interpreted:
+* ``rectangle`` draws an axis-aligned square whose half-diagonal is the
+  radius, so ``R = sqrt(2) / 2`` makes the square coincide with the cell;
+* ``circle`` draws a circle of that radius, so ``R = 0.5`` fits inside the
+  cell.
 
-  - ``percent``: a literal percentage of the maximum neighbour extent.
-  - ``min``: the smallest figure that still contains the immediate neighbours
-    (a described circle for a circle, or the direct 8-neighbourhood for a
-    rectangle).
-  - ``max``: a figure that always fully includes one adjacent cell.
+``min`` is the largest radius that still touches no neighbouring cell,
+``max`` is ``1.5`` (the far edge of an adjacent cell), and ``percent``
+interpolates between them.
+
+A neighbour participates in the context as soon as its rectangle *intersects*
+the figure, which is what makes partially visible cells possible.
 
 The module deliberately has no Django imports so it can be unit tested in
 isolation and reused by future grid types.
@@ -22,15 +24,25 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+SQUARE = "rectangle"
+CIRCLE = "circle"
+
+#: Radius of the circle in which the context figure is inscribed.
+MIN_RADIUS_SQUARE = math.sqrt(2) / 2
+MIN_RADIUS_CIRCLE = 0.5
+MAX_RADIUS = 1.5
+
+_EPSILON = 1e-9
+
 
 @dataclass(frozen=True)
 class NeighborResolver:
-    """Resolve which cells belong to a context zone.
+    """Resolve which cells are covered by the context figure.
 
     Attributes:
         shape: Either ``"rectangle"`` or ``"circle"``.
         radius_mode: One of ``"percent"``, ``"min"`` or ``"max"``.
-        radius_pct: Radius value in the range ``0..100``.
+        radius_pct: Radius value in the range 0..100.
     """
 
     shape: str
@@ -43,25 +55,26 @@ class NeighborResolver:
         col: int,
         grid_rows: int,
         grid_cols: int,
-        cell_aspect: float = 1.0,
     ) -> list[tuple[int, int]]:
-        """Return the neighbour coordinates covered by the context zone.
+        """Return every neighbour whose cell overlaps the context figure.
+
+        Cells merely touching the figure boundary are not included, which is
+        what makes ``min`` produce zero neighbours.
 
         Args:
             row: Row index of the unlocked cell.
             col: Column index of the unlocked cell.
             grid_rows: Total number of rows in the grid.
             grid_cols: Total number of columns in the grid.
-            cell_aspect: Height-to-width ratio of a cell, used for circles.
 
         Returns:
             A sorted list of ``(row, col)`` neighbours excluding the cell
             itself.
         """
         radius = self.effective_radius()
+        reach = math.ceil(radius) + 1
         found: set[tuple[int, int]] = set()
 
-        reach = max(1, math.ceil(radius) + 1)
         for dr in range(-reach, reach + 1):
             for dc in range(-reach, reach + 1):
                 if dr == 0 and dc == 0:
@@ -72,45 +85,76 @@ class NeighborResolver:
                     continue
                 if not 0 <= candidate_col < grid_cols:
                     continue
-                if self._contains(dr, dc, radius, cell_aspect):
+                if self._intersects(dr, dc, radius):
                     found.add((candidate_row, candidate_col))
 
         return sorted(found)
 
     def effective_radius(self) -> float:
-        """Translate the configured radius into a distance in cell units.
+        """Translate the configured radius mode into a radius in cells.
 
         Returns:
-            The radius measured in cells.
+            The radius of the circumscribed circle of the context figure.
         """
+        minimum = self.minimum_radius()
         if self.radius_mode == "min":
-            return math.sqrt(2) if self.shape == "circle" else 1.0
+            return minimum
         if self.radius_mode == "max":
-            return 2.0 if self.shape == "rectangle" else math.sqrt(5)
-        # Percent interpolates from empty (0) to the max figure (100).
-        span = 2.0 if self.shape == "rectangle" else math.sqrt(5)
-        return max(0.0, self.radius_pct / 100.0 * span)
+            return MAX_RADIUS
+        percent = max(0.0, min(100.0, float(self.radius_pct)))
+        return minimum + percent / 100.0 * (MAX_RADIUS - minimum)
 
-    def _contains(
-        self, dr: int, dc: int, radius: float, cell_aspect: float
-    ) -> bool:
-        """Return whether a neighbour offset lies inside the context zone.
+    def minimum_radius(self) -> float:
+        """Return the largest radius that still touches no neighbour.
 
-        Rectangles use the Chebyshev (box) metric so the zone is an
-        axis-aligned square; circles use the Euclidean metric.
+        Returns:
+            ``sqrt(2) / 2`` for a square (it matches the cell exactly) and
+            ``0.5`` for a circle (it is inscribed in the cell).
+        """
+        return MIN_RADIUS_SQUARE if self.shape == SQUARE else MIN_RADIUS_CIRCLE
+
+    def shape_params(self, row: int, col: int) -> dict:
+        """Return the context figure description for the client.
+
+        Args:
+            row: Row index of the unlocked cell.
+            col: Column index of the unlocked cell.
+
+        Returns:
+            A mapping with the figure kind, its radius in cells and the
+            centre of the figure in grid coordinates.
+        """
+        return {
+            "kind": self.shape,
+            "radius_cells": self.effective_radius(),
+            "center_row": row,
+            "center_col": col,
+        }
+
+    def _intersects(self, dr: int, dc: int, radius: float) -> bool:
+        """Return whether the cell overlaps the interior of the figure.
+
+        Offsets are expressed in cells (a cell is a unit square in the
+        figure's coordinate space), so a circle stays round and a square
+        keeps equal sides regardless of the canvas aspect ratio.
 
         Args:
             dr: Row offset relative to the unlocked cell.
             dc: Column offset relative to the unlocked cell.
-            radius: Effective radius measured in cells.
-            cell_aspect: Height-to-width ratio of a cell.
+            radius: Radius of the circumscribed circle in cells.
 
         Returns:
-            True when the neighbour participates in the context.
+            True when the neighbour cell overlaps the figure's interior.
         """
         if radius <= 0:
             return False
-        if self.shape == "rectangle":
-            return max(abs(dr), abs(dc)) <= radius + 1e-9
-        distance = math.hypot(float(dc), float(dr) * cell_aspect)
-        return distance <= radius + 1e-9
+
+        half = 0.5
+        # Distance from the figure centre to the closest point of the cell.
+        dx = max(0.0, abs(dc) - half)
+        dy = max(0.0, abs(dr) - half)
+
+        if self.shape == SQUARE:
+            side = radius / math.sqrt(2)
+            return dx < side - _EPSILON and dy < side - _EPSILON
+        return math.hypot(dx, dy) < radius - _EPSILON

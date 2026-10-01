@@ -1,4 +1,5 @@
 import { Group, Line, Rect, Text } from "react-konva";
+import type Konva from "konva";
 import type { RenderedStroke } from "../../shared/renderHistory";
 
 /** A neighbour cell of the read-only context zone prepared for rendering. */
@@ -11,28 +12,46 @@ export interface ContextCellView {
   strokes: RenderedStroke[];
 }
 
+/** Geometry of the figure the context is cropped to (radius in cells). */
+export interface ContextShapeView {
+  kind: string;
+  radiusCells: number;
+}
+
 interface Props {
   cellWidth: number;
   cellHeight: number;
-  /** Grid coordinates of the zone origin (top-left neighbour). */
+  /** Grid coordinates of the zone origin (top-left covered cell). */
   originRow: number;
   originCol: number;
   /** Number of grid rows and columns covered by the zone. */
   rows: number;
   cols: number;
+  /** Grid coordinates of the cell being edited. */
+  cellRow: number;
+  cellCol: number;
+  /** Figure the context is cropped to; defaults to a full-cell square. */
+  shape: ContextShapeView | null;
   cells: ContextCellView[];
   /** Id of the neighbour currently hovered, if any. */
   hoveredCellId: string | null;
   onHover: (cellId: string | null) => void;
 }
 
-const ZONE_BORDER_COLOR = "#42a5f5";
+const CONTEXT_COLOR = "#42a5f5";
 const EMPTY_FILL = "#e9ecef";
 const FILLED_FILL = "#ffffff";
+const ZONE_FILL = "#f0f2f4";
+
+/** Radius used when the backend did not provide a figure (matches a cell). */
+const DEFAULT_RADIUS_CELLS = Math.SQRT1_2;
 
 /**
- * Renders the read-only context zone: every neighbour of the unlocked cell
- * with its committed drawing, dashed blue boundary and comment markers.
+ * Renders the read-only context around the cell being edited.
+ *
+ * All neighbours intersecting the context figure are shown, but their drawing
+ * is clipped to the figure: the area outside the figure stays grey. A dashed
+ * line marks the boundary between the edited cell and the context.
  */
 export default function ContextOverlay({
   cellWidth,
@@ -41,88 +60,186 @@ export default function ContextOverlay({
   originCol,
   rows,
   cols,
+  cellRow,
+  cellCol,
+  shape,
   cells,
   hoveredCellId,
   onHover,
 }: Props) {
-  const zoneWidth = cols * cellWidth;
-  const zoneHeight = rows * cellHeight;
+  const kind = shape?.kind ?? "rectangle";
+  const radius = shape?.radiusCells ?? DEFAULT_RADIUS_CELLS;
+
+  // The figure is measured in cell widths for both axes so a circle stays
+  // round and a square keeps equal visual sides on non-square canvases.
+  const unit = cellWidth;
+  const centerX = (cellCol - originCol + 0.5) * cellWidth;
+  const centerY = (cellRow - originRow + 0.5) * cellHeight;
+  const halfFigure =
+    kind === "circle" ? radius * unit : (radius / Math.SQRT2) * unit;
+
+  const zoneRight = cols * cellWidth;
+  const zoneBottom = rows * cellHeight;
+  const minX = Math.min(0, centerX - halfFigure);
+  const minY = Math.min(0, centerY - halfFigure);
+  const maxX = Math.max(zoneRight, centerX + halfFigure);
+  const maxY = Math.max(zoneBottom, centerY + halfFigure);
+
+  const clipFigure = (ctx: Konva.Context) => {
+    ctx.beginPath();
+    if (kind === "circle") {
+      ctx.arc(centerX, centerY, halfFigure, 0, Math.PI * 2, false);
+    } else {
+      ctx.rect(
+        centerX - halfFigure,
+        centerY - halfFigure,
+        halfFigure * 2,
+        halfFigure * 2,
+      );
+    }
+    ctx.closePath();
+  };
+
+  const cellX = (col: number) => (col - originCol) * cellWidth;
+  const cellY = (row: number) => (row - originRow) * cellHeight;
 
   return (
     <Group>
+      {/* Neutral backdrop under the whole visible zone. */}
       <Rect
-        x={0}
-        y={0}
-        width={zoneWidth}
-        height={zoneHeight}
-        fill="#f5f6f7"
-        stroke={ZONE_BORDER_COLOR}
-        strokeWidth={2}
-        dash={[10, 6]}
-        cornerRadius={4}
+        x={minX}
+        y={minY}
+        width={maxX - minX}
+        height={maxY - minY}
+        fill={ZONE_FILL}
         listening={false}
       />
-      {cells.map((cell) => {
-        const x = (cell.col - originCol) * cellWidth;
-        const y = (cell.row - originRow) * cellHeight;
-        const filled = cell.status === "filled";
-        const hovered = hoveredCellId === cell.cellId;
 
+      {/* Grey placeholders for every intersecting neighbour. */}
+      {cells.map((cell) => (
+        <Rect
+          key={`bg-${cell.cellId}`}
+          x={cellX(cell.col)}
+          y={cellY(cell.row)}
+          width={cellWidth}
+          height={cellHeight}
+          fill={EMPTY_FILL}
+          stroke="#b0bec5"
+          strokeWidth={1}
+          cornerRadius={2}
+          listening={false}
+        />
+      ))}
+
+      {/* Cell content, clipped to the context figure. */}
+      <Group clipFunc={clipFigure}>
+        {cells.map((cell) => {
+          const filled = cell.status === "filled";
+          if (!filled) return null;
+          return (
+            <Group
+              key={`content-${cell.cellId}`}
+              x={cellX(cell.col)}
+              y={cellY(cell.row)}
+            >
+              <Rect
+                width={cellWidth}
+                height={cellHeight}
+                fill={FILLED_FILL}
+                listening={false}
+              />
+              {cell.strokes.map((stroke, index) => (
+                <Line
+                  key={index}
+                  points={stroke.points}
+                  stroke={stroke.erase ? "#ffffff" : stroke.color}
+                  strokeWidth={stroke.size}
+                  lineCap="round"
+                  lineJoin="round"
+                  tension={0.3}
+                  globalCompositeOperation="source-over"
+                  listening={false}
+                />
+              ))}
+            </Group>
+          );
+        })}
+      </Group>
+
+      {/* Hover highlight, drawn on top of the figure so it is never clipped. */}
+      {cells.map((cell) => {
+        const hovered = hoveredCellId === cell.cellId;
+        if (!hovered) return null;
         return (
-          <Group key={cell.cellId} x={x} y={y}>
+          <Rect
+            key={`hover-${cell.cellId}`}
+            x={cellX(cell.col)}
+            y={cellY(cell.row)}
+            width={cellWidth}
+            height={cellHeight}
+            stroke={CONTEXT_COLOR}
+            strokeWidth={2}
+            cornerRadius={2}
+            listening={false}
+          />
+        );
+      })}
+
+      {/* Comment markers, always visible for cells that have a comment. */}
+      {cells.map((cell) => {
+        if (!cell.comment) return null;
+        const x = cellX(cell.col) + cellWidth - 26;
+        const y = cellY(cell.row) + 4;
+        return (
+          <Group key={`comment-${cell.cellId}`} listening={false}>
             <Rect
-              width={cellWidth}
-              height={cellHeight}
-              fill={filled ? FILLED_FILL : EMPTY_FILL}
-              stroke={hovered ? ZONE_BORDER_COLOR : "#b0bec5"}
-              strokeWidth={hovered ? 2 : 1}
-              cornerRadius={2}
-              onMouseEnter={() => onHover(cell.cellId)}
-              onMouseLeave={() => onHover(null)}
-              onTouchStart={() => onHover(cell.cellId)}
+              x={x}
+              y={y}
+              width={22}
+              height={18}
+              fill={CONTEXT_COLOR}
+              cornerRadius={4}
+              opacity={0.9}
             />
-            {filled
-              ? cell.strokes.map((stroke, index) => (
-                  <Line
-                    key={index}
-                    points={stroke.points}
-                    stroke={stroke.erase ? "#ffffff" : stroke.color}
-                    strokeWidth={stroke.size}
-                    lineCap="round"
-                    lineJoin="round"
-                    tension={0.3}
-                    globalCompositeOperation="source-over"
-                    listening={false}
-                  />
-                ))
-              : null}
-            {cell.comment ? (
-              <>
-                <Rect
-                  x={cellWidth - 26}
-                  y={4}
-                  width={22}
-                  height={18}
-                  fill={ZONE_BORDER_COLOR}
-                  cornerRadius={4}
-                  opacity={0.9}
-                  listening={false}
-                />
-                <Text
-                  x={cellWidth - 26}
-                  y={5}
-                  width={22}
-                  text="✎"
-                  align="center"
-                  fontSize={12}
-                  fill="#ffffff"
-                  listening={false}
-                />
-              </>
-            ) : null}
+            <Text
+              x={x}
+              y={y + 1}
+              width={22}
+              text="✎"
+              align="center"
+              fontSize={12}
+              fill="#ffffff"
+            />
           </Group>
         );
       })}
+
+      {/* Transparent hover targets: one per neighbour. */}
+      {cells.map((cell) => (
+        <Rect
+          key={`hit-${cell.cellId}`}
+          x={cellX(cell.col)}
+          y={cellY(cell.row)}
+          width={cellWidth}
+          height={cellHeight}
+          fill="rgba(0,0,0,0)"
+          onMouseEnter={() => onHover(cell.cellId)}
+          onMouseLeave={() => onHover(null)}
+          onTouchStart={() => onHover(cell.cellId)}
+        />
+      ))}
+
+      {/* Dashed separator between the edited cell and the context. */}
+      <Rect
+        x={cellX(cellCol)}
+        y={cellY(cellRow)}
+        width={cellWidth}
+        height={cellHeight}
+        stroke="#1565c0"
+        strokeWidth={2}
+        dash={[8, 5]}
+        listening={false}
+      />
     </Group>
   );
 }

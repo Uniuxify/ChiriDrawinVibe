@@ -1,7 +1,10 @@
 /** Axios client with JWT bearer auth and a one-shot refresh on 401. */
 
 import axios, { AxiosError, type AxiosRequestConfig } from "axios";
+import { debug } from "../shared/debug";
 import { useAuthStore } from "../store/auth";
+
+const log = debug("api");
 
 export const api = axios.create({
   baseURL: "/api/v1",
@@ -13,6 +16,11 @@ api.interceptors.request.use((config) => {
   if (accessToken) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
+  log.log(`→ ${config.method?.toUpperCase()} ${config.url}`, {
+    params: config.params,
+    data: config.data,
+    hasAuth: Boolean(accessToken),
+  });
   return config;
 });
 
@@ -37,22 +45,35 @@ async function refreshAccessToken(): Promise<string | null> {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    log.log(
+      `← ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`,
+      response.data,
+    );
+    return response;
+  },
   async (error: AxiosError) => {
     const original = error.config as
       | (AxiosRequestConfig & { _retried?: boolean })
       | undefined;
     const status = error.response?.status;
+    log.warn(`✖ ${status ?? "?"} ${original?.method?.toUpperCase()} ${original?.url}`, {
+      detail: error.response?.data,
+      message: error.message,
+    });
     if (status === 401 && original && !original._retried) {
       original._retried = true;
+      log.log("Refreshing expired access token…");
       refreshing = refreshing ?? refreshAccessToken();
       const token = await refreshing;
       refreshing = null;
       if (token) {
+        log.log("Token refreshed, retrying request");
         original.headers = original.headers ?? {};
         original.headers.Authorization = `Bearer ${token}`;
         return api(original);
       }
+      log.error("Token refresh failed; request will be rejected");
     }
     return Promise.reject(error);
   },

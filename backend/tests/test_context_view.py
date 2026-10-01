@@ -35,8 +35,8 @@ def running_session(db, django_user_model):
         interval_seconds=60,
         unlock_quota=1,
         context_shape="rectangle",
-        context_radius_mode="min",
-        context_radius_pct=0,
+        context_radius_mode="max",
+        context_radius_pct=100,
         distribution_strategy="random",
         is_public=False,
     )
@@ -59,14 +59,46 @@ def test_context_returns_every_neighbour(running_session):
     assert response.status_code == 200
     payload = response.data
     assert payload["context"] is not None
+    assert payload["shape"]["kind"] == "rectangle"
+    assert payload["shape"]["radius_cells"] == pytest.approx(1.5)
+    assert payload["shape"]["center_row"] == cell.row
+    assert payload["shape"]["center_col"] == cell.col
+
     neighbor_ids = {item["cell_id"] for item in payload["neighbors"]}
     assert neighbor_ids == set(payload["context"]["neighbor_ids"])
     assert payload["neighbors"], "the 2x2 grid must expose neighbours"
     for item in payload["neighbors"]:
-        assert "status" in item
+        assert item["status"] in {"empty", "unlocked", "filled", "orphan"}
         assert "comment" in item
         assert "raster" in item
         assert (item["row"], item["col"]) != (cell.row, cell.col)
+
+
+def test_context_lists_own_filled_neighbour(running_session):
+    """A filled cell owned by the caller is part of its own context."""
+    session, player = running_session
+    cell = session.cells.filter(owner=player).first()
+    unlock_cell(cell.id, player)
+
+    # Mark a diagonally adjacent cell as filled so it must appear.
+    neighbour = session.cells.exclude(id=cell.id).first()
+    neighbour.status = "filled"
+    neighbour.comment = "hello"
+    neighbour.save(update_fields=["status", "comment"])
+
+    factory = APIRequestFactory()
+    request = factory.get(f"/cells/{cell.id}/context")
+    force_authenticate(request, user=player)
+    response = CellContextView.as_view()(request, cell_id=cell.id)
+
+    assert response.status_code == 200
+    entry = next(
+        item
+        for item in response.data["neighbors"]
+        if item["cell_id"] == str(neighbour.id)
+    )
+    assert entry["status"] == "filled"
+    assert entry["comment"] == "hello"
 
 
 def test_context_is_empty_without_snapshot(running_session):

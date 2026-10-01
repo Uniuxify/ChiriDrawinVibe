@@ -6,6 +6,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.cells.context import NeighborResolver
 from apps.cells.models import Cell, CellContextSnapshot
 from apps.cells.serializers import (
     AutosaveSerializer,
@@ -202,6 +203,12 @@ class CellContextView(APIView):
         if snapshot is None:
             return Response({"context": None, "neighbors": []})
 
+        session = cell.session
+        resolver = NeighborResolver(
+            shape=session.context_shape,
+            radius_mode=session.context_radius_mode,
+            radius_pct=session.context_radius_pct,
+        )
         neighbours = cell.session.cells.filter(id__in=snapshot.neighbor_ids)
         payload = []
         for neighbour in neighbours:
@@ -221,7 +228,13 @@ class CellContextView(APIView):
                 }
             )
         payload.sort(key=lambda item: (item["row"], item["col"]))
-        return Response({"context": _context_payload(snapshot), "neighbors": payload})
+        return Response(
+            {
+                "context": _context_payload(snapshot),
+                "neighbors": payload,
+                "shape": resolver.shape_params(cell.row, cell.col),
+            }
+        )
 
 
 class CellAdminUnlockView(APIView):

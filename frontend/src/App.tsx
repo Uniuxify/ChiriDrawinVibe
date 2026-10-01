@@ -7,6 +7,7 @@ import SessionCreatePage from "./features/sessions/SessionCreatePage";
 import SessionDetailPage from "./features/sessions/SessionDetailPage";
 import CellEditorPage from "./features/editor/CellEditorPage";
 import PublicListPage from "./features/viewer/PublicListPage";
+import DebugPanel from "./features/debug/DebugPanel";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const token = useAuthStore((s) => s.accessToken);
@@ -15,7 +16,8 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/public" element={<PublicListPage />} />
@@ -51,7 +53,9 @@ export default function App() {
           </RequireAuth>
         }
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      <DebugPanel />
+    </>
   );
 }

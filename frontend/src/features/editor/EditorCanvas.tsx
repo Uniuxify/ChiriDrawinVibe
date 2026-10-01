@@ -9,6 +9,7 @@ import {
 } from "../../shared/renderHistory";
 import ContextOverlay, {
   type ContextCellView,
+  type ContextShapeView,
 } from "./ContextOverlay";
 import type { EditorTool } from "./EditorToolbar";
 
@@ -23,6 +24,8 @@ interface Props {
   originCol: number;
   contextRows: number;
   contextCols: number;
+  /** Figure the context is cropped to, from the backend. */
+  contextShape: ContextShapeView | null;
   history: DrawOperation[];
   tool: EditorTool;
   color: string;
@@ -60,6 +63,7 @@ export default function EditorCanvas({
   originCol,
   contextRows,
   contextCols,
+  contextShape,
   history,
   tool,
   color,
@@ -195,6 +199,9 @@ export default function EditorCanvas({
             originCol={originCol}
             rows={contextRows}
             cols={contextCols}
+            cellRow={cellRow}
+            cellCol={cellCol}
+            shape={contextShape}
             cells={contextCells}
             hoveredCellId={hoveredCellId}
             onHover={(cellId) => {

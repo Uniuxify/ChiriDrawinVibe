@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Box,
@@ -24,6 +24,7 @@ import {
 import { fetchSessionState } from "../../api/sessions";
 import type { DrawOperation } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
+import { debug } from "../../shared/debug";
 import { strokesFromHistory } from "../../shared/renderHistory";
 import ColorPalette from "./ColorPalette";
 import EditorCanvas from "./EditorCanvas";
@@ -31,6 +32,8 @@ import EditorToolbar, { type EditorTool } from "./EditorToolbar";
 import type { ContextCellView } from "./ContextOverlay";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
+
+const log = debug("editor");
 
 /**
  * Full-page drawing editor for one unlocked cell: read-only context zone in
@@ -40,6 +43,7 @@ export default function CellEditorPage() {
   const { id, cellId } = useParams();
   const sessionId = Number(id);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [tool, setTool] = useState<EditorTool>("brush");
   const [color, setColor] = useState("#000000");
@@ -71,7 +75,10 @@ export default function CellEditorPage() {
   });
 
   const ownHistoryQuery = useQuery({
-    queryKey: ["cell-history", cellId],
+    // Distinct key from the neighbour histories below: otherwise a stale
+    // pre-commit entry (empty operations) is reused when this very cell later
+    // shows up as a filled neighbour in another cell's context zone.
+    queryKey: ["cell-history", "own", cellId],
     queryFn: () => fetchCellHistory(cellId!),
     enabled: Boolean(cellId),
     retry: false,
@@ -90,9 +97,14 @@ export default function CellEditorPage() {
   useEffect(() => {
     if (hydratedRef.current || ownHistoryQuery.data == null) return;
     hydratedRef.current = true;
+    log.log("Hydrated own history", {
+      cellId,
+      revision: ownHistoryQuery.data.revision,
+      operations: ownHistoryQuery.data.operations.length,
+    });
     setHistory(ownHistoryQuery.data.operations);
     revisionRef.current = ownHistoryQuery.data.revision;
-  }, [ownHistoryQuery.data]);
+  }, [cellId, ownHistoryQuery.data]);
 
   const neighbors = contextQuery.data?.neighbors ?? [];
   const filledNeighborIds = useMemo(
@@ -103,6 +115,34 @@ export default function CellEditorPage() {
     [neighbors],
   );
 
+  // Trace the raw context payload and the neighbours selected for rendering.
+  useEffect(() => {
+    log.log("Context query state", {
+      cellId,
+      isLoading: contextQuery.isLoading,
+      isError: contextQuery.isError,
+      error: contextQuery.error
+        ? extractApiMessage(contextQuery.error)
+        : null,
+      neighborCount: neighbors.length,
+      filledNeighborIds,
+      neighbors: neighbors.map((n) => ({
+        id: n.cell_id,
+        row: n.row,
+        col: n.col,
+        status: n.status,
+        hasComment: Boolean(n.comment),
+      })),
+    });
+  }, [
+    cellId,
+    contextQuery.error,
+    contextQuery.isError,
+    contextQuery.isLoading,
+    filledNeighborIds,
+    neighbors,
+  ]);
+
   const neighborHistoryQueries = useQueries({
     queries: filledNeighborIds.map((neighborId) => ({
       queryKey: ["cell-history", neighborId],
@@ -112,6 +152,23 @@ export default function CellEditorPage() {
       retry: false,
     })),
   });
+
+  // Trace each neighbour's fetched history used to draw the context zone.
+  useEffect(() => {
+    log.log(
+      "Neighbour histories",
+      filledNeighborIds.map((neighborId, index) => {
+        const query = neighborHistoryQueries[index];
+        return {
+          neighborId,
+          isLoading: query?.isLoading,
+          isError: query?.isError,
+          error: query?.error ? extractApiMessage(query.error) : null,
+          operations: query?.data?.operations.length ?? null,
+        };
+      }),
+    );
+  }, [filledNeighborIds, neighborHistoryQueries]);
 
   const contextCells = useMemo<ContextCellView[]>(
     () =>
@@ -138,6 +195,12 @@ export default function CellEditorPage() {
   const originCol = bounds?.min_col ?? cell?.col ?? 0;
   const contextRows = bounds ? bounds.max_row - bounds.min_row + 1 : 1;
   const contextCols = bounds ? bounds.max_col - bounds.min_col + 1 : 1;
+
+  const contextShape = useMemo(() => {
+    const raw = contextQuery.data?.shape;
+    if (!raw) return null;
+    return { kind: raw.kind, radiusCells: raw.radius_cells };
+  }, [contextQuery.data?.shape]);
 
   const hoveredComment = useMemo(() => {
     if (!hoveredCellId) return null;
@@ -203,7 +266,14 @@ export default function CellEditorPage() {
   const commitMutation = useMutation({
     mutationFn: () =>
       commitCell(cellId!, history, revisionRef.current, comment.trim()),
-    onSuccess: () => navigate(`/sessions/${sessionId}`),
+    onSuccess: () => {
+      // Drop the shared history cache for this cell so a later context zone
+      // re-fetches the committed content instead of a stale empty entry.
+      log.log("Commit succeeded, clearing history cache", { cellId });
+      queryClient.removeQueries({ queryKey: ["cell-history", cellId] });
+      void queryClient.invalidateQueries({ queryKey: ["cell-history"] });
+      navigate(`/sessions/${sessionId}`);
+    },
     onError: (err) => {
       setCommitOpen(false);
       setError(extractApiMessage(err, "Could not commit the cell."));
@@ -314,6 +384,7 @@ export default function CellEditorPage() {
           originCol={originCol}
           contextRows={contextRows}
           contextCols={contextCols}
+          contextShape={contextShape}
           history={history}
           tool={tool}
           color={color}

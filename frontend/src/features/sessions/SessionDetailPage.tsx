@@ -23,8 +23,11 @@ import {
 import { unlockCell } from "../../api/cells";
 import type { CellDTO } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
+import { debug } from "../../shared/debug";
 import { useAuthStore } from "../../store/auth";
 import SessionCanvas from "../canvas/SessionCanvas";
+
+const log = debug("session");
 
 /** Active session screen: grid, indicators, admin controls, editor entry. */
 export default function SessionDetailPage() {
@@ -145,21 +148,43 @@ export default function SessionDetailPage() {
     }
 
     const isMine = (cell.owner_id ?? cell.owner) === myUserId;
-    if (!isMine) return;
+    log.log("Cell selected", {
+      cellId: cell.id,
+      row: cell.row,
+      col: cell.col,
+      status: cell.status,
+      owner: cell.owner_id ?? cell.owner,
+      locked_by_user_id: cell.locked_by_user_id,
+      is_mine: cell.is_mine,
+      myUserId,
+      finished,
+      canUnlock,
+    });
+    if (!isMine) {
+      log.warn("Selected cell is not owned by me; ignoring", {
+        cellId: cell.id,
+        owner: cell.owner_id ?? cell.owner,
+        myUserId,
+      });
+      return;
+    }
 
     if (
       cell.status === "unlocked" &&
       cell.locked_by_user_id === myUserId
     ) {
+      log.log("Opening editor for already-unlocked own cell", cell.id);
       openEditor(cell.id);
       return;
     }
 
     if (cell.status === "empty") {
       if (!canUnlock) {
+        log.warn("Cannot unlock: no unlock available");
         setError("You cannot unlock a cell right now.");
         return;
       }
+      log.log("Requesting unlock confirmation", cell.id);
       setPendingCell(cell);
       setConfirmOpen(true);
     }

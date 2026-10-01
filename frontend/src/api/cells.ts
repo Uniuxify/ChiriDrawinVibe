@@ -1,7 +1,10 @@
 /** Cell operations: unlock, lock, autosave, commit and context. */
 
+import { debug } from "../shared/debug";
 import { api } from "./client";
 import type { DrawOperation } from "./types";
+
+const log = debug("cells");
 
 export interface UnlockedCell {
   id: string;
@@ -42,6 +45,16 @@ export interface ContextNeighbor {
   raster: { url: string; width: number; height: number } | null;
 }
 
+/** Geometry of the context figure centred on the unlocked cell. */
+export interface ContextShape {
+  /** Either "rectangle" (a square) or "circle". */
+  kind: string;
+  /** Radius of the circumscribed circle, in cells. */
+  radius_cells: number;
+  center_row: number;
+  center_col: number;
+}
+
 export interface ContextPayload {
   context: {
     cell_id: string;
@@ -50,11 +63,14 @@ export interface ContextPayload {
   } | null;
   /** Every neighbour of the zone, filled or not. */
   neighbors: ContextNeighbor[];
+  /** Geometry of the figure the context is cropped to. */
+  shape?: ContextShape;
 }
 
 /** Unlock a cell owned by the caller and return its frozen context. */
 export async function unlockCell(cellId: string): Promise<UnlockResult> {
   const { data } = await api.post<UnlockResult>(`/cells/${cellId}/unlock`);
+  log.log(`unlockCell(${cellId}) →`, data);
   return data;
 }
 
@@ -73,6 +89,10 @@ export async function autosaveCell(
     `/cells/${cellId}/autosave`,
     { operations, revision },
   );
+  log.log(`autosaveCell(${cellId}) rev ${revision} →`, {
+    operations: operations.length,
+    result: data,
+  });
   return data;
 }
 
@@ -83,17 +103,32 @@ export async function commitCell(
   revision: number,
   comment?: string,
 ): Promise<void> {
+  log.log(`commitCell(${cellId}) rev ${revision}`, {
+    operations: operations.length,
+    comment,
+  });
   await api.post(`/cells/${cellId}/commit`, {
     operations,
     revision,
     comment: comment ?? "",
   });
+  log.log(`commitCell(${cellId}) done`);
 }
 
 export async function fetchCellContext(
   cellId: string,
 ): Promise<ContextPayload> {
   const { data } = await api.get<ContextPayload>(`/cells/${cellId}/context`);
+  log.log(`fetchCellContext(${cellId}) →`, {
+    bounds: data.context?.bounds ?? null,
+    shape: data.shape ?? null,
+    neighbors: data.neighbors.map((n) => ({
+      id: n.cell_id,
+      row: n.row,
+      col: n.col,
+      status: n.status,
+    })),
+  });
   return data;
 }
 
@@ -122,5 +157,10 @@ export async function fetchCellHistory(
   cellId: string,
 ): Promise<CellHistoryPayload> {
   const { data } = await api.get<CellHistoryPayload>(`/cells/${cellId}/history`);
+  log.log(`fetchCellHistory(${cellId}) →`, {
+    revision: data.revision,
+    is_final: data.is_final,
+    operations: data.operations.length,
+  });
   return data;
 }

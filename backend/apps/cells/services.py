@@ -71,11 +71,8 @@ def compute_context_cells(cell: Cell) -> list[Cell]:
         radius_mode=session.context_radius_mode,
         radius_pct=session.context_radius_pct,
     )
-    aspect = (session.canvas_height / session.grid_rows) / (
-        session.canvas_width / session.grid_cols
-    )
     coordinates = resolver.resolve(
-        cell.row, cell.col, session.grid_rows, session.grid_cols, aspect
+        cell.row, cell.col, session.grid_rows, session.grid_cols
     )
     if not coordinates:
         return []

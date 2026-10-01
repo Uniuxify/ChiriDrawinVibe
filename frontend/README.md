@@ -51,6 +51,21 @@ src/
   only), periodic autosave, and an irreversible commit dialog with an optional
   comment.
 
+## Debug tools
+
+A lightweight in-app debugger makes it easier to trace the context/render flow:
+
+- A floating 🐞 button (lower-right) opens the **Debug log** panel, showing API
+  calls, context payloads, neighbour histories and session/editor events.
+- Logging is **on by default on `localhost`**. Toggle it with the switch in the
+  panel, or force it with `localStorage.setItem("chiridrawin:debug", "1")` /
+  `window.__CHIRI_DEBUG__ = true` before the app boots.
+- In code, use the namespaced helper from `src/shared/debug.ts`:
+  `const log = debug("myFeature"); log.log("message", data)`.
+- Namespaces in use: `api` (every request/response/error), `cells`
+  (unlock/autosave/commit/context/history), `editor` (context + neighbour
+  history flow) and `session` (cell selection/unlock decisions).
+
 ## Checks
 
 ```bash
