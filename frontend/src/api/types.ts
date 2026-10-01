@@ -105,6 +105,7 @@ export interface MySessionsResponse {
   finished: SessionDTO[];
 }
 
+/** Flat public configuration consumed by the UI. */
 export interface PublicConfig {
   polling_interval_seconds: number;
   autosave_interval_seconds: number;
@@ -114,6 +115,23 @@ export interface PublicConfig {
   max_grid: number;
   max_ops_per_cell: number;
   max_history_json_bytes: number;
+  /** Upper bound on players per session. */
+  max_players: number;
+}
+
+/** Raw `GET /config` payload; limits are grouped under `limits`. */
+export interface PublicConfigResponse {
+  polling_interval_seconds: number;
+  autosave_interval_seconds: number;
+  limits: {
+    min_canvas_size: number;
+    max_canvas_size: number;
+    min_grid: number;
+    max_grid: number;
+    max_ops_per_cell: number;
+    max_history_json_bytes: number;
+    max_players?: number;
+  };
 }
 
 /** A single drawing operation in a cell's history. */

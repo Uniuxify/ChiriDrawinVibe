@@ -33,7 +33,7 @@ class DistributionStrategy(models.TextChoices):
     """Strategy used to assign cells to players at session start."""
 
     RANDOM = "random", "Random"
-    MIN_ADJACENT = "min_adjacent", "Min adjacent"
+    MIN_ADJACENT = "min_adjacent", "Balanced"
 
 
 class CellStatus(models.TextChoices):

@@ -158,6 +158,7 @@ export default function SessionCreatePage() {
   const maxSize = config?.max_canvas_size ?? 10000;
   const minGrid = config?.min_grid ?? 2;
   const maxGrid = config?.max_grid ?? 100;
+  const maxPlayers = config?.max_players ?? 10;
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -229,7 +230,10 @@ export default function SessionCreatePage() {
     grid_cols: validateNumber(form.grid_cols, { min: minGrid, max: maxGrid }) ?? undefined,
     grid_rows: validateNumber(form.grid_rows, { min: minGrid, max: maxGrid }) ?? undefined,
     players_count:
-      validateNumber(form.players_count, { min: 1, max: cellCount }) ?? undefined,
+      validateNumber(form.players_count, {
+        min: 1,
+        max: Math.min(cellCount ?? maxPlayers, maxPlayers),
+      }) ?? undefined,
     interval_seconds:
       validateNumber(form.interval_seconds, { min: 0 }) ?? undefined,
     unlock_quota: validateNumber(form.unlock_quota, { min: 1 }) ?? undefined,
@@ -355,7 +359,7 @@ export default function SessionCreatePage() {
             label="Max Players"
             type="number"
             value={form.players_count}
-            inputProps={{ min: 1 }}
+            inputProps={{ min: 1, max: maxPlayers }}
             onChange={(e) => update("players_count", e.target.value)}
             onBlur={() => onNumberBlur("players_count")}
             error={Boolean(errors.players_count)}
@@ -449,7 +453,7 @@ export default function SessionCreatePage() {
             }
           >
             <MenuItem value="random">Random</MenuItem>
-            <MenuItem value="min_adjacent">Min adjacent</MenuItem>
+            <MenuItem value="min_adjacent">Balanced</MenuItem>
           </Select>
         </FormControl>
 

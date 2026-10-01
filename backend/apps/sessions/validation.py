@@ -45,6 +45,10 @@ def validate_session_config(data: dict) -> None:
         raise ValidationError("players_count must be at least 1.")
     if players > cols * rows:
         raise ValidationError("players_count cannot exceed the number of cells.")
+    if players > settings.MAX_PLAYERS:
+        raise ValidationError(
+            f"players_count must be at most {settings.MAX_PLAYERS}."
+        )
 
     interval = int(data.get("interval_seconds") or 0)
     if interval < settings.MIN_INTERVAL_SECONDS:

@@ -203,6 +203,8 @@ MAX_GRID = env_int("MAX_GRID", 100)
 MAX_OPS_PER_CELL = env_int("MAX_OPS_PER_CELL", 20000)
 MAX_HISTORY_JSON_BYTES = env_int("MAX_HISTORY_JSON_BYTES", 5_000_000)
 MIN_INTERVAL_SECONDS = env_int("MIN_INTERVAL_SECONDS", 0)
+#: Upper bound on players per session; keeps grid colouring search cheap.
+MAX_PLAYERS = env_int("MAX_PLAYERS", 10)
 
 # Celery. Defaults to eager execution so no broker is required locally.
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")

@@ -35,6 +35,7 @@ class PublicConfigView(APIView):
                     "max_ops_per_cell": settings.MAX_OPS_PER_CELL,
                     "max_history_json_bytes": settings.MAX_HISTORY_JSON_BYTES,
                     "min_interval_seconds": settings.MIN_INTERVAL_SECONDS,
+                    "max_players": settings.MAX_PLAYERS,
                 },
             }
         )

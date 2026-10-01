@@ -11,14 +11,17 @@ from apps.cells.models import Cell
 from apps.common.enums import CellStatus, SessionStatus
 from apps.common.errors import ConflictError, ValidationError
 from apps.iterations.models import Iteration
+from apps.sessions.distribution import build_assignment
 from apps.sessions.models import GameSession
 
 
 def distribute_cells(session: GameSession) -> None:
     """Assign every grid cell to a player using the configured strategy.
 
-    Cells are created for the whole grid and then handed out in a shuffled
-    order so that each player receives a balanced, non-adjacent share.
+    The ``min_adjacent`` strategy colours the grid with one class per player
+    so neighbours rarely share an owner (see
+    :mod:`apps.sessions.distribution`), then maps classes to players randomly.
+    The ``random`` strategy simply shuffles the cells.
 
     Args:
         session: The session being started.
@@ -30,14 +33,16 @@ def distribute_cells(session: GameSession) -> None:
     if not players:
         raise ValidationError("A session needs at least one active player to start.")
 
+    if session.distribution_strategy == "min_adjacent":
+        _distribute_coloured(session, players)
+        return
+
     positions = [
         (row, col)
         for row in range(session.grid_rows)
         for col in range(session.grid_cols)
     ]
-
-    if session.distribution_strategy == "random":
-        random.shuffle(positions)
+    random.shuffle(positions)
 
     for index, (row, col) in enumerate(positions):
         player = players[index % len(players)]
@@ -49,6 +54,33 @@ def distribute_cells(session: GameSession) -> None:
             original_owner=player.user,
             status=CellStatus.EMPTY,
         )
+
+
+def _distribute_coloured(session: GameSession, players: list) -> None:
+    """Create cells coloured so neighbouring cells rarely share an owner.
+
+    Args:
+        session: The session being started.
+        players: The active players, in join order.
+    """
+    grid = build_assignment(session.grid_rows, session.grid_cols, len(players))
+
+    # Map classes to players randomly so the same colours do not always go to
+    # the same people across sessions.
+    order = list(players)
+    random.shuffle(order)
+
+    for row in range(session.grid_rows):
+        for col in range(session.grid_cols):
+            player = order[grid[row][col]]
+            Cell.objects.create(
+                session=session,
+                row=row,
+                col=col,
+                owner=player.user,
+                original_owner=player.user,
+                status=CellStatus.EMPTY,
+            )
 
 
 @transaction.atomic

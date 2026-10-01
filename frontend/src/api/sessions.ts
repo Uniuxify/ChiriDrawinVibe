@@ -5,6 +5,7 @@ import type {
   IterationDTO,
   MySessionsResponse,
   PublicConfig,
+  PublicConfigResponse,
   SessionDTO,
   SessionStateDTO,
 } from "./types";
@@ -67,6 +68,17 @@ export async function fetchIteration(id: number): Promise<IterationDTO | null> {
 }
 
 export async function fetchConfig(): Promise<PublicConfig> {
-  const { data } = await api.get<PublicConfig>("/config");
-  return data;
+  const { data } = await api.get<PublicConfigResponse>("/config");
+  const limits = data.limits;
+  return {
+    polling_interval_seconds: data.polling_interval_seconds,
+    autosave_interval_seconds: data.autosave_interval_seconds,
+    min_canvas_size: limits.min_canvas_size,
+    max_canvas_size: limits.max_canvas_size,
+    min_grid: limits.min_grid,
+    max_grid: limits.max_grid,
+    max_ops_per_cell: limits.max_ops_per_cell,
+    max_history_json_bytes: limits.max_history_json_bytes,
+    max_players: limits.max_players ?? 10,
+  };
 }
