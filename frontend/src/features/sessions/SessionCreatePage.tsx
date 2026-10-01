@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -22,7 +22,15 @@ import type {
   DistributionStrategy,
 } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
+import type { CellGeometry } from "../../shared/contextGeometry";
+import {
+  SLIDER_STEP,
+  contextThresholds,
+  countSegments,
+  snapToThresholds,
+} from "../../shared/contextGeometry";
 import ContextPreview from "./ContextPreview";
+import ContextRadiusScale from "./ContextRadiusScale";
 
 /**
  * Raw form state. Numeric fields are kept as strings so the user can clear
@@ -62,6 +70,15 @@ const initial: FormState = {
 interface NumberRule {
   min: number;
   max?: number;
+}
+
+/** Pixels per cell, guarding against empty or invalid form input. */
+function cellPixels(size: number, cells: number): number {
+  if (!Number.isFinite(size) || !Number.isFinite(cells) || cells <= 0) {
+    return 1;
+  }
+  const value = size / cells;
+  return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 /** Admin form for creating a new drawing session. */
@@ -120,6 +137,24 @@ export default function SessionCreatePage() {
 
   const cellCount =
     Number(form.grid_cols) * Number(form.grid_rows) || undefined;
+
+  // Real cell pixels drive the preview, the count line and the slider magnet.
+  const cellGeometry = useMemo<CellGeometry>(
+    () => ({
+      width: cellPixels(Number(form.canvas_width), Number(form.grid_cols)),
+      height: cellPixels(Number(form.canvas_height), Number(form.grid_rows)),
+      shape: "rectangle",
+    }),
+    [form.canvas_width, form.canvas_height, form.grid_cols, form.grid_rows],
+  );
+  const thresholds = useMemo(
+    () => contextThresholds(form.context_shape, cellGeometry),
+    [form.context_shape, cellGeometry],
+  );
+  const segments = useMemo(
+    () => countSegments(form.context_shape, cellGeometry),
+    [form.context_shape, cellGeometry],
+  );
 
   const errors: Partial<Record<keyof FormState, string>> = {
     canvas_width: validateNumber(form.canvas_width, { min: minSize, max: maxSize }) ?? undefined,
@@ -291,20 +326,31 @@ export default function SessionCreatePage() {
             <Slider
               value={form.context_radius_pct}
               onChange={(_, value) =>
-                update("context_radius_pct", value as number)
+                update(
+                  "context_radius_pct",
+                  snapToThresholds(value as number, thresholds),
+                )
               }
               min={0}
               max={100}
+              step={SLIDER_STEP}
               valueLabelDisplay="auto"
               aria-label="Context radius percent"
             />
+            <ContextRadiusScale
+              segments={segments}
+              thresholds={thresholds}
+              value={form.context_radius_pct}
+            />
             <Typography variant="caption" color="text.secondary">
-              0% matches the cell; 100% reaches the neighbouring cells.
+              0% is the cell itself; dashed marks show where the context grows
+              a cell.
             </Typography>
           </Box>
           <ContextPreview
             shape={form.context_shape}
             radiusPct={form.context_radius_pct}
+            cell={cellGeometry}
           />
         </Box>
 

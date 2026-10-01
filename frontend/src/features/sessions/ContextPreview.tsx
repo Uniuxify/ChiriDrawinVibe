@@ -1,40 +1,88 @@
 import { Box } from "@mui/material";
-import type { ContextShape } from "../../api/types";
+import type {
+  CellGeometry,
+  CellShapeKind,
+  ContextShapeKind,
+} from "../../shared/contextGeometry";
+import { figureGeometry } from "../../shared/contextGeometry";
 
 interface Props {
-  shape: ContextShape;
+  shape: ContextShapeKind;
   /** Radius as a percentage from 0 to 100. */
   radiusPct: number;
+  /** Real geometry of one cell of the session being created. */
+  cell: CellGeometry;
 }
 
-const CELL = 40;
+/** The preview box: a 3x3 neighbourhood of cells, scaled to fit. */
+const SIZE = 120;
 const GRID = 3;
-const SIZE = CELL * GRID;
 
 const CELL_FILL = "#e9ecef";
 const BORDER_COLOR = "#b0bec5";
-const FIGURE_FILL = "#ffffff";
+const FIGURE_FILL = "#e3f2fd";
+const CENTRE_FILL = "#ffffff";
 
 /**
- * A small interactive preview of the context figure.
+ * Render one grid cell.
  *
- * Renders a 3x3 grid of cells, all grey, with the white context figure centred
- * on the middle cell. The figure radius follows the slider: 0% makes the
- * figure coincide with the cell, 100% reaches the full ring of neighbours.
- * The central cell is always highlighted white regardless of the shape or
- * radius. Cell borders are drawn on top so they always stay visible.
+ * The switch keeps future grid types (non-rectangular cells) pluggable: only
+ * the cell outline is shape-specific, everything else uses the bounding box.
  */
-export default function ContextPreview({ shape, radiusPct }: Props) {
-  const pct = Math.max(0, Math.min(100, radiusPct));
-  // Mirrors the backend: R = min(cell) * (0.5 + pct/100). The preview cells
-  // are square, so min(cell) == CELL. At 0% R is half a cell, which makes the
-  // square figure coincide exactly with the cell.
-  const radius = CELL * (0.5 + pct / 100);
+function CellShape({
+  shape,
+  x,
+  y,
+  width,
+  height,
+  fill,
+}: {
+  shape: CellShapeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fill: string;
+}) {
+  switch (shape) {
+    case "rectangle":
+    default:
+      return <rect x={x} y={y} width={width} height={height} fill={fill} />;
+  }
+}
 
-  const centre = SIZE / 2;
-  // Both figures are sized by the same radius: a circle of radius R and a
-  // square whose inscribed circle has radius R (half-side = R).
-  const halfFigure = radius;
+/**
+ * Interactive preview of the context figure.
+ *
+ * The 3x3 cells keep the real aspect ratio of the session cells, so the
+ * preview matches what players will actually see. Layering: grey cells, then
+ * the pale blue context figure clipped to the neighbourhood, then the always
+ * white central cell, and finally the cell borders on top.
+ */
+export default function ContextPreview({ shape, radiusPct, cell }: Props) {
+  const width = Number.isFinite(cell.width) && cell.width > 0 ? cell.width : 1;
+  const height =
+    Number.isFinite(cell.height) && cell.height > 0 ? cell.height : 1;
+  const realCell: CellGeometry = { ...cell, width, height };
+
+  // Fit the whole neighbourhood into the box while keeping the real aspect.
+  const scale = Math.min(SIZE / (GRID * width), SIZE / (GRID * height));
+  const cellW = width * scale;
+  const cellH = height * scale;
+  const gridW = GRID * cellW;
+  const gridH = GRID * cellH;
+  const originX = (SIZE - gridW) / 2;
+  const originY = (SIZE - gridH) / 2;
+
+  const pct = Math.max(0, Math.min(100, radiusPct));
+  // The figure is computed from the scaled cell so it lives in viewBox units.
+  const figure = figureGeometry(shape, { ...realCell, width: cellW, height: cellH }, pct);
+
+  const centreIndex = Math.floor(GRID / 2);
+  const centreX = originX + centreIndex * cellW;
+  const centreY = originY + centreIndex * cellH;
+  const centreCx = centreX + cellW / 2;
+  const centreCy = centreY + cellH / 2;
 
   return (
     <Box
@@ -53,52 +101,65 @@ export default function ContextPreview({ shape, radiusPct }: Props) {
       aria-label="Context figure preview"
     >
       <defs>
-        <clipPath id="context-preview-clip">
-          <rect x={0} y={0} width={SIZE} height={SIZE} />
+        <clipPath id="context-preview-grid">
+          <rect x={originX} y={originY} width={gridW} height={gridH} />
         </clipPath>
       </defs>
 
-      {/* Grey cells. */}
+      {/* Grey cells: everything outside the context stays grey. */}
       {Array.from({ length: GRID }).map((_, row) =>
         Array.from({ length: GRID }).map((__, col) => (
-          <rect
+          <CellShape
             key={`cell-${row}-${col}`}
-            x={col * CELL}
-            y={row * CELL}
-            width={CELL}
-            height={CELL}
+            shape={cell.shape}
+            x={originX + col * cellW}
+            y={originY + row * cellH}
+            width={cellW}
+            height={cellH}
             fill={CELL_FILL}
           />
         )),
       )}
 
-      {/* The central cell is always highlighted white. */}
-      <rect x={CELL} y={CELL} width={CELL} height={CELL} fill={FIGURE_FILL} />
-
-      {/* White context figure, clipped to the 3x3 area. */}
-      <g clipPath="url(#context-preview-clip)">
-        {shape === "circle" ? (
-          <circle cx={centre} cy={centre} r={halfFigure} fill={FIGURE_FILL} />
+      {/* Pale blue context figure, clipped to the neighbourhood. */}
+      <g clipPath="url(#context-preview-grid)">
+        {figure.kind === "circle" ? (
+          <circle
+            cx={centreCx}
+            cy={centreCy}
+            r={figure.halfWidth}
+            fill={FIGURE_FILL}
+          />
         ) : (
           <rect
-            x={centre - halfFigure}
-            y={centre - halfFigure}
-            width={halfFigure * 2}
-            height={halfFigure * 2}
+            x={centreCx - figure.halfWidth}
+            y={centreCy - figure.halfHeight}
+            width={figure.halfWidth * 2}
+            height={figure.halfHeight * 2}
             fill={FIGURE_FILL}
           />
         )}
       </g>
+
+      {/* The central cell is always white. */}
+      <CellShape
+        shape={cell.shape}
+        x={centreX}
+        y={centreY}
+        width={cellW}
+        height={cellH}
+        fill={CENTRE_FILL}
+      />
 
       {/* Cell borders on top so they stay visible over the figure. */}
       {Array.from({ length: GRID }).map((_, row) =>
         Array.from({ length: GRID }).map((__, col) => (
           <rect
             key={`border-${row}-${col}`}
-            x={col * CELL}
-            y={row * CELL}
-            width={CELL}
-            height={CELL}
+            x={originX + col * cellW}
+            y={originY + row * cellH}
+            width={cellW}
+            height={cellH}
             fill="none"
             stroke={BORDER_COLOR}
             strokeWidth={1}
