@@ -18,9 +18,10 @@ interface Props {
 const SIZE = 120;
 const GRID = 3;
 
-const CELL_FILL = "#e9ecef";
-const BORDER_COLOR = "#b0bec5";
-const FIGURE_FILL = "#e3f2fd";
+const CELL_FILL = "#adb5bd";
+const BORDER_COLOR = "#90a4ae";
+const FIGURE_FILL = "#90caf9";
+const FIGURE_BORDER = "#1565c0";
 const CENTRE_FILL = "#ffffff";
 
 /**
@@ -56,8 +57,9 @@ function CellShape({
  *
  * The 3x3 cells keep the real aspect ratio of the session cells, so the
  * preview matches what players will actually see. Layering: grey cells, then
- * the pale blue context figure clipped to the neighbourhood, then the always
- * white central cell, and finally the cell borders on top.
+ * the light blue context figure clipped to the neighbourhood, then the always
+ * white central cell, a dashed blue outline of the figure, and finally the
+ * cell borders on top.
  */
 export default function ContextPreview({ shape, radiusPct, cell }: Props) {
   const width = Number.isFinite(cell.width) && cell.width > 0 ? cell.width : 1;
@@ -121,7 +123,7 @@ export default function ContextPreview({ shape, radiusPct, cell }: Props) {
         )),
       )}
 
-      {/* Pale blue context figure, clipped to the neighbourhood. */}
+      {/* Light blue context figure, clipped to the neighbourhood. */}
       <g clipPath="url(#context-preview-grid)">
         {figure.kind === "circle" ? (
           <circle
@@ -150,6 +152,31 @@ export default function ContextPreview({ shape, radiusPct, cell }: Props) {
         height={cellH}
         fill={CENTRE_FILL}
       />
+
+      {/* Dashed blue outline of the context figure, drawn on top so the
+          whole stroke stays visible. */}
+      {figure.kind === "circle" ? (
+        <circle
+          cx={centreCx}
+          cy={centreCy}
+          r={figure.halfWidth}
+          fill="none"
+          stroke={FIGURE_BORDER}
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
+        />
+      ) : (
+        <rect
+          x={centreCx - figure.halfWidth}
+          y={centreCy - figure.halfHeight}
+          width={figure.halfWidth * 2}
+          height={figure.halfHeight * 2}
+          fill="none"
+          stroke={FIGURE_BORDER}
+          strokeWidth={1.5}
+          strokeDasharray="4 3"
+        />
+      )}
 
       {/* Cell borders on top so they stay visible over the figure. */}
       {Array.from({ length: GRID }).map((_, row) =>
