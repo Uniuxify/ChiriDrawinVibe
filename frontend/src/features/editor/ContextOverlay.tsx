@@ -12,10 +12,13 @@ export interface ContextCellView {
   strokes: RenderedStroke[];
 }
 
-/** Geometry of the figure the context is cropped to (radius in cells). */
+/** Geometry of the figure the context is cropped to, in pixels. */
 export interface ContextShapeView {
   kind: string;
-  radiusCells: number;
+  /** Half width of the figure in pixels. */
+  halfWidth: number;
+  /** Half height of the figure in pixels. */
+  halfHeight: number;
 }
 
 interface Props {
@@ -43,8 +46,8 @@ const EMPTY_FILL = "#e9ecef";
 const FILLED_FILL = "#ffffff";
 const ZONE_FILL = "#f0f2f4";
 
-/** Radius used when the backend did not provide a figure (matches a cell). */
-const DEFAULT_RADIUS_CELLS = Math.SQRT1_2;
+/** Fallback figure when the backend did not provide one: the cell itself. */
+const DEFAULT_HALF = 1;
 
 /**
  * Renders the read-only context around the cell being edited.
@@ -68,34 +71,26 @@ export default function ContextOverlay({
   onHover,
 }: Props) {
   const kind = shape?.kind ?? "rectangle";
-  const radius = shape?.radiusCells ?? DEFAULT_RADIUS_CELLS;
+  // The backend sends pixel half-extents; fall back to the edited cell itself.
+  const halfW = shape?.halfWidth ?? (cellWidth / 2 || DEFAULT_HALF);
+  const halfH = shape?.halfHeight ?? (cellHeight / 2 || DEFAULT_HALF);
 
-  // The figure is measured in cell widths for both axes so a circle stays
-  // round and a square keeps equal visual sides on non-square canvases.
-  const unit = cellWidth;
   const centerX = (cellCol - originCol + 0.5) * cellWidth;
   const centerY = (cellRow - originRow + 0.5) * cellHeight;
-  const halfFigure =
-    kind === "circle" ? radius * unit : (radius / Math.SQRT2) * unit;
 
   const zoneRight = cols * cellWidth;
   const zoneBottom = rows * cellHeight;
-  const minX = Math.min(0, centerX - halfFigure);
-  const minY = Math.min(0, centerY - halfFigure);
-  const maxX = Math.max(zoneRight, centerX + halfFigure);
-  const maxY = Math.max(zoneBottom, centerY + halfFigure);
+  const minX = Math.min(0, centerX - halfW);
+  const minY = Math.min(0, centerY - halfH);
+  const maxX = Math.max(zoneRight, centerX + halfW);
+  const maxY = Math.max(zoneBottom, centerY + halfH);
 
   const clipFigure = (ctx: Konva.Context) => {
     ctx.beginPath();
     if (kind === "circle") {
-      ctx.arc(centerX, centerY, halfFigure, 0, Math.PI * 2, false);
+      ctx.arc(centerX, centerY, halfW, 0, Math.PI * 2, false);
     } else {
-      ctx.rect(
-        centerX - halfFigure,
-        centerY - halfFigure,
-        halfFigure * 2,
-        halfFigure * 2,
-      );
+      ctx.rect(centerX - halfW, centerY - halfH, halfW * 2, halfH * 2);
     }
     ctx.closePath();
   };

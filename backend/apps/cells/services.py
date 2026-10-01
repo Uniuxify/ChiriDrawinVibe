@@ -70,6 +70,8 @@ def compute_context_cells(cell: Cell) -> list[Cell]:
         shape=session.context_shape,
         radius_mode=session.context_radius_mode,
         radius_pct=session.context_radius_pct,
+        cell_width=session.canvas_width / session.grid_cols,
+        cell_height=session.canvas_height / session.grid_rows,
     )
     coordinates = resolver.resolve(
         cell.row, cell.col, session.grid_rows, session.grid_cols

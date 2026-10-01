@@ -49,8 +49,10 @@ export interface ContextNeighbor {
 export interface ContextShape {
   /** Either "rectangle" (a square) or "circle". */
   kind: string;
-  /** Radius of the circumscribed circle, in cells. */
-  radius_cells: number;
+  /** Half width of the figure, in pixels. */
+  half_width: number;
+  /** Half height of the figure, in pixels. */
+  half_height: number;
   center_row: number;
   center_col: number;
 }

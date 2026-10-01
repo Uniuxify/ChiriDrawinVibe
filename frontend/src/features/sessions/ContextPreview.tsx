@@ -26,15 +26,15 @@ const FIGURE_FILL = "#ffffff";
  */
 export default function ContextPreview({ shape, radiusPct }: Props) {
   const pct = Math.max(0, Math.min(100, radiusPct));
-  // Radius in cells, mirroring the backend: the minimum radius (the figure
-  // matching the cell) at 0% up to 1.5 at 100%.
-  const minimum = shape === "circle" ? 0.5 : Math.SQRT1_2;
-  const radiusCells = minimum + (pct / 100) * (1.5 - minimum);
+  // Mirrors the backend: R = min(cell) * (0.5 + pct/100). The preview cells
+  // are square, so min(cell) == CELL. At 0% R is half a cell, which makes the
+  // square figure coincide exactly with the cell.
+  const radius = CELL * (0.5 + pct / 100);
 
   const centre = SIZE / 2;
-  // A circle uses the radius directly; a square's half-side is radius / sqrt(2).
-  const halfFigure =
-    shape === "circle" ? radiusCells * CELL : (radiusCells / Math.SQRT2) * CELL;
+  // Both figures are sized by the same radius: a circle of radius R and a
+  // square whose inscribed circle has radius R (half-side = R).
+  const halfFigure = radius;
 
   return (
     <Box

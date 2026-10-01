@@ -60,7 +60,9 @@ def test_context_returns_every_neighbour(running_session):
     payload = response.data
     assert payload["context"] is not None
     assert payload["shape"]["kind"] == "rectangle"
-    assert payload["shape"]["radius_cells"] == pytest.approx(1.5)
+    # 400x400 canvas on a 2x2 grid -> 200px cells; max radius = 1.5 * 200.
+    assert payload["shape"]["half_width"] == pytest.approx(300.0)
+    assert payload["shape"]["half_height"] == pytest.approx(300.0)
     assert payload["shape"]["center_row"] == cell.row
     assert payload["shape"]["center_col"] == cell.col
 

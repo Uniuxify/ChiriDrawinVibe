@@ -199,7 +199,11 @@ export default function CellEditorPage() {
   const contextShape = useMemo(() => {
     const raw = contextQuery.data?.shape;
     if (!raw) return null;
-    return { kind: raw.kind, radiusCells: raw.radius_cells };
+    return {
+      kind: raw.kind,
+      halfWidth: raw.half_width,
+      halfHeight: raw.half_height,
+    };
   }, [contextQuery.data?.shape]);
 
   const hoveredComment = useMemo(() => {

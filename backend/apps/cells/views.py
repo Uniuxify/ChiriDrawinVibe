@@ -208,6 +208,8 @@ class CellContextView(APIView):
             shape=session.context_shape,
             radius_mode=session.context_radius_mode,
             radius_pct=session.context_radius_pct,
+            cell_width=session.canvas_width / session.grid_cols,
+            cell_height=session.canvas_height / session.grid_rows,
         )
         neighbours = cell.session.cells.filter(id__in=snapshot.neighbor_ids)
         payload = []
