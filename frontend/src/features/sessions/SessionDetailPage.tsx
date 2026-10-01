@@ -213,13 +213,23 @@ export default function SessionDetailPage() {
   }
 
   return (
-    <Box sx={{ p: 3 }}>
+    <Box
+      sx={{
+        p: 2,
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        boxSizing: "border-box",
+      }}
+    >
       <Box
         sx={{
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           mb: 2,
+          flexShrink: 0,
         }}
       >
         <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
@@ -251,7 +261,16 @@ export default function SessionDetailPage() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       {/* Indicators */}
-      <Box sx={{ display: "flex", gap: 3, alignItems: "center", mb: 2 }}>
+      <Box
+        sx={{
+          display: "flex",
+          gap: 3,
+          alignItems: "center",
+          flexWrap: "wrap",
+          mb: 2,
+          flexShrink: 0,
+        }}
+      >
         <Box sx={{ minWidth: 220 }}>
           <Typography variant="body2" color="text.secondary">
             Canvas {completed_pct}% complete
@@ -297,16 +316,28 @@ export default function SessionDetailPage() {
         )}
       </Box>
 
-      <Box sx={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
-        <SessionCanvas
-          session={session}
-          cells={cells}
-          myUserId={myUserId}
-          onSelect={handleSelect}
-          revealed={revealed}
-          isAdminMode={adminMode && isAdmin}
-        />
-        <Box sx={{ minWidth: 240 }}>
+      <Box
+        sx={{
+          display: "flex",
+          gap: 3,
+          flex: 1,
+          minHeight: 0,
+          flexWrap: "nowrap",
+        }}
+      >
+        <Box sx={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <SessionCanvas
+            session={session}
+            cells={cells}
+            myUserId={myUserId}
+            onSelect={handleSelect}
+            revealed={revealed}
+            isAdminMode={adminMode && isAdmin}
+          />
+        </Box>
+        <Box
+          sx={{ width: 260, flexShrink: 0, overflowY: "auto", minHeight: 0 }}
+        >
           <Typography variant="subtitle1">Session info</Typography>
           <Typography variant="body2" color="text.secondary">
             Grid: {session.grid_cols}×{session.grid_rows}
