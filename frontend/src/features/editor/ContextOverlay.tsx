@@ -257,16 +257,20 @@ interface BoundaryProps {
 }
 
 const BOUNDARY_COLOR = "#757575";
-const BOUNDARY_DASH = [6, 4];
+const BOUNDARY_DASH = [4, 4];
+const BOUNDARY_WIDTH = 1
+/** Translucent grey tint of the context area (rgba; Konva has no fillOpacity). */
+const BOUNDARY_FILL = "rgba(117, 117, 117, 0.3)";
 
 /**
- * Grey dashed outline of the part of the edited cell that ends up in the
- * context of its neighbours.
+ * Translucent area, marked by a grey dashed outline, of the part of the
+ * edited cell that ends up in the context of its neighbours.
  *
- * Each neighbour's context figure is centred on that neighbour; outlining it
- * clipped to the edited cell yields exactly the slice of the cell that
- * neighbour will see as context. With `showAll` the outlines of every
- * neighbour are drawn (their union), otherwise only the hovered one.
+ * Each neighbour's context figure is centred on that neighbour; clipping it
+ * to the edited cell yields exactly the slice of the cell that neighbour will
+ * see as context, which is tinted with `BOUNDARY_FILL` and outlined by a
+ * dashed line. With `showAll` the area of every neighbour is drawn (their
+ * union), otherwise only the hovered one.
  */
 export function ContextBoundary({
   cellWidth,
@@ -313,9 +317,9 @@ export function ContextBoundary({
               y={cy}
               radiusX={halfW}
               radiusY={halfH}
-              fill="none"
+              fill={BOUNDARY_FILL}
               stroke={BOUNDARY_COLOR}
-              strokeWidth={2}
+              strokeWidth={BOUNDARY_WIDTH}
               dash={BOUNDARY_DASH}
               listening={false}
             />
@@ -328,9 +332,9 @@ export function ContextBoundary({
             y={cy - halfH}
             width={halfW * 2}
             height={halfH * 2}
-            fill="none"
+            fill={BOUNDARY_FILL}
             stroke={BOUNDARY_COLOR}
-            strokeWidth={2}
+            strokeWidth={BOUNDARY_WIDTH}
             dash={BOUNDARY_DASH}
             listening={false}
           />
