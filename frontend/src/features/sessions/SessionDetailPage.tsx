@@ -11,8 +11,12 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  FormControl,
+  InputLabel,
   LinearProgress,
   Link,
+  MenuItem,
+  Select,
   Typography,
 } from "@mui/material";
 import {
@@ -33,6 +37,62 @@ import SessionCanvas from "../canvas/SessionCanvas";
 
 const log = debug("session");
 
+/** Algorithms driving the Open All reveal cascade. */
+type RevealAlgorithm = "ordered" | "line" | "diagonal" | "spiral" | "random";
+
+const REVEAL_ALGORITHMS: { value: RevealAlgorithm; label: string }[] = [
+  { value: "ordered", label: "Ordered" },
+  { value: "line", label: "Line" },
+  { value: "diagonal", label: "Diagonal" },
+  { value: "spiral", label: "Spiral" },
+  { value: "random", label: "Random" },
+];
+
+/** Browser-local key holding the last chosen reveal algorithm. */
+const REVEAL_ALGO_STORAGE_KEY = "chiridrawin:reveal-algorithm";
+
+/**
+ * Read the algorithm remembered by the browser.
+ *
+ * Defaults to "diagonal" until the user makes their first choice.
+ */
+function loadStoredAlgorithm(): RevealAlgorithm {
+  try {
+    const stored = window.localStorage.getItem(REVEAL_ALGO_STORAGE_KEY);
+    if (
+      stored === "ordered" ||
+      stored === "line" ||
+      stored === "diagonal" ||
+      stored === "spiral" ||
+      stored === "random"
+    ) {
+      return stored;
+    }
+  } catch {
+    // localStorage may be unavailable (privacy mode, SSR).
+  }
+  return "diagonal";
+}
+
+/** Remember the chosen algorithm in the browser. */
+function storeAlgorithm(algorithm: RevealAlgorithm): void {
+  try {
+    window.localStorage.setItem(REVEAL_ALGO_STORAGE_KEY, algorithm);
+  } catch {
+    // Ignore storage failures; the choice simply stays in-memory.
+  }
+}
+
+/** Return a shuffled copy of the array (Fisher-Yates). */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 /** Active session screen: grid, indicators, admin controls, editor entry. */
 export default function SessionDetailPage() {
   const { id } = useParams();
@@ -52,6 +112,8 @@ export default function SessionDetailPage() {
   const [openAllPhase, setOpenAllPhase] = useState<
     "idle" | "cooling" | "instant" | "ready"
   >("idle");
+  const [revealAlgorithm, setRevealAlgorithm] =
+    useState<RevealAlgorithm>(loadStoredAlgorithm);
   const [revealReady, setRevealReady] = useState(false);
   const revealTimersRef = useRef<number[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -247,25 +309,136 @@ export default function SessionDetailPage() {
   }
 
   /**
-   * Reveal the remaining cells one by one: the first one right away, the
-   * rest spread evenly across the logarithmic total time.
+   * Group the still-hidden cells for the selected algorithm; all cells
+   * inside one group are revealed simultaneously.
+   */
+  function buildRevealGroups(): string[][] {
+    const remaining = cells.filter((cell) => !revealed.has(cell.id));
+    if (remaining.length === 0) return [];
+
+    if (revealAlgorithm === "line") {
+      // One row at a time, top to bottom; a row opens all at once.
+      const rows = new Map<number, CellDTO[]>();
+      for (const cell of remaining) {
+        rows.set(cell.row, [...(rows.get(cell.row) ?? []), cell]);
+      }
+      return [...rows.keys()]
+        .sort((a, b) => a - b)
+        .map((row) =>
+          (rows.get(row) ?? [])
+            .sort((a, b) => a.col - b.col)
+            .map((cell) => cell.id),
+        );
+    }
+
+    if (revealAlgorithm === "diagonal") {
+      // Diagonals starting at the top-left corner, all at once per band.
+      const minRow = Math.min(...cells.map((cell) => cell.row));
+      const minCol = Math.min(...cells.map((cell) => cell.col));
+      const diagonals = new Map<number, CellDTO[]>();
+      for (const cell of remaining) {
+        const key = cell.row - minRow + (cell.col - minCol);
+        diagonals.set(key, [...(diagonals.get(key) ?? []), cell]);
+      }
+      return [...diagonals.keys()]
+        .sort((a, b) => a - b)
+        .map((key) => (diagonals.get(key) ?? []).map((cell) => cell.id));
+    }
+
+    if (revealAlgorithm === "spiral") {
+      // A true grid spiral from the centre outward: right, down, left, up
+      // with legs 1, 1, 2, 2, 3, 3… so consecutive cells are neighbours and
+      // the path never jumps. Steps outside the grid are skipped; any cell
+      // the walk failed to reach is appended at the end as a safety net.
+      const minRow = Math.min(...cells.map((cell) => cell.row));
+      const maxRow = Math.max(...cells.map((cell) => cell.row));
+      const minCol = Math.min(...cells.map((cell) => cell.col));
+      const maxCol = Math.max(...cells.map((cell) => cell.col));
+      const centreRow = Math.floor((minRow + maxRow) / 2);
+      const centreCol = Math.floor((minCol + maxCol) / 2);
+      const remainingIds = new Set(remaining.map((cell) => cell.id));
+      const idByPosition = new Map(
+        cells.map((cell) => [`${cell.row}:${cell.col}`, cell.id]),
+      );
+
+      const order: string[] = [];
+      const visited = new Set<string>();
+      const push = (row: number, col: number) => {
+        const key = `${row}:${col}`;
+        if (visited.has(key)) return;
+        visited.add(key);
+        const id = idByPosition.get(key);
+        if (id !== undefined && remainingIds.has(id)) order.push(id);
+      };
+
+      const directions = [
+        [0, 1], // right
+        [1, 0], // down
+        [0, -1], // left
+        [-1, 0], // up
+      ];
+      const maxMoves = cells.length * 4 + 64;
+      let row = centreRow;
+      let col = centreCol;
+      let legLength = 1;
+      let direction = 0;
+      let moves = 0;
+      push(row, col);
+      while (order.length < remaining.length && moves < maxMoves) {
+        for (
+          let twice = 0;
+          twice < 2 && order.length < remaining.length;
+          twice += 1
+        ) {
+          const [dr, dc] = directions[direction % 4];
+          for (let step = 0; step < legLength; step += 1) {
+            row += dr;
+            col += dc;
+            moves += 1;
+            push(row, col);
+          }
+          direction += 1;
+        }
+        legLength += 1;
+      }
+
+      if (order.length < remaining.length) {
+        const placed = new Set(order);
+        for (const cell of remaining) {
+          if (!placed.has(cell.id)) order.push(cell.id);
+        }
+      }
+      return order.map((id) => [id]);
+    }
+
+    if (revealAlgorithm === "random") {
+      // One random cell per step.
+      return shuffle(remaining).map((cell) => [cell.id]);
+    }
+
+    // Ordered: one cell at a time, row by row.
+    return [...remaining]
+      .sort((a, b) => a.row - b.row || a.col - b.col)
+      .map((cell) => [cell.id]);
+  }
+
+  /**
+   * Reveal the remaining cells with the selected algorithm: the first group
+   * opens right away, the rest are spread evenly across the logarithmic
+   * total time; cells of one group open simultaneously.
    */
   function handleOpenAll() {
-    const remaining = cells
-      .filter((cell) => !revealed.has(cell.id))
-      .sort((a, b) => a.row - b.row || a.col - b.col)
-      .map((cell) => cell.id);
-    if (remaining.length === 0) return;
+    const groups = buildRevealGroups();
+    if (groups.length === 0) return;
     clearRevealTimers();
+    const count = groups.reduce((total, group) => total + group.length, 0);
     const step =
-      remaining.length > 1
-        ? cascadeTotalMs(remaining.length) / (remaining.length - 1)
-        : 0;
-    remaining.forEach((cellId, index) => {
+      groups.length > 1 ? cascadeTotalMs(count) / (groups.length - 1) : 0;
+    groups.forEach((group, index) => {
       const timer = window.setTimeout(() => {
         setRevealed((prev) => {
           const next = new Set(prev);
-          next.add(cellId);
+          for (const cellId of group) next.add(cellId);
           return next;
         });
       }, step * index);
@@ -465,6 +638,29 @@ export default function SessionDetailPage() {
           >
             Finish early
           </Button>
+        )}
+        {/* The algorithm menu always sits in the same spot: before the
+            reveal buttons, which swap between Open All and Hide. */}
+        {finished && (
+          <FormControl size="small" sx={{ minWidth: 130 }}>
+            <InputLabel id="reveal-algo-label">Algorithm</InputLabel>
+            <Select
+              labelId="reveal-algo-label"
+              label="Algorithm"
+              value={revealAlgorithm}
+              onChange={(event) => {
+                const next = event.target.value as RevealAlgorithm;
+                setRevealAlgorithm(next);
+                storeAlgorithm(next);
+              }}
+            >
+              {REVEAL_ALGORITHMS.map((algorithm) => (
+                <MenuItem key={algorithm.value} value={algorithm.value}>
+                  {algorithm.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
         )}
         {finished && !allRevealedNow && (
           <Button
