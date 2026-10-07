@@ -410,24 +410,26 @@ export default function EditorCanvas({
             animation: "commentWindowFadeIn 0.25s ease-out",
           }}
         >
-          <Typography
-            variant="subtitle2"
-            sx={{ fontWeight: 700, color: "#ffffff", textAlign: "center" }}
-          >
-            Cell comment
-          </Typography>
-          <Typography
-            variant="body2"
-            sx={{
-              color: "#ffffff",
-              mt: 0.5,
-              textAlign: "center",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
-            {hoveredCell.comment || "No comment"}
-          </Typography>
+          {hoveredCell.comment ? (
+            <Typography
+              variant="body2"
+              sx={{
+                color: "#ffffff",
+                textAlign: "center",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+              }}
+            >
+              {hoveredCell.comment}
+            </Typography>
+          ) : (
+            <Typography
+              variant="subtitle2"
+              sx={{ fontWeight: 700, color: "#ffffff", textAlign: "center" }}
+            >
+              This Cell Is Empty
+            </Typography>
+          )}
         </Box>
       )}
     </Box>
