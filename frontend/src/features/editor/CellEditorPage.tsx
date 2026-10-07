@@ -265,11 +265,12 @@ export default function CellEditorPage() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (!(event.ctrlKey || event.metaKey)) return;
-      const key = event.key.toLowerCase();
-      if (key === "z") {
+      // `event.code` addresses the physical key, so the shortcuts keep
+      // working regardless of the active keyboard layout (e.g. Cyrillic).
+      if (event.code === "KeyZ") {
         event.preventDefault();
         undo();
-      } else if (key === "y") {
+      } else if (event.code === "KeyY") {
         event.preventDefault();
         redo();
       }
