@@ -27,6 +27,9 @@ class PublicConfigView(APIView):
             {
                 "polling_interval_seconds": settings.POLLING_INTERVAL_SECONDS,
                 "autosave_interval_seconds": settings.AUTOSAVE_INTERVAL_SECONDS,
+                "editor_min_context_visible_pct": (
+                    settings.EDITOR_MIN_CONTEXT_VISIBLE_PCT
+                ),
                 "limits": {
                     "min_canvas_size": settings.MIN_CANVAS_SIZE,
                     "max_canvas_size": settings.MAX_CANVAS_SIZE,

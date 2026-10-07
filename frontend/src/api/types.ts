@@ -117,12 +117,15 @@ export interface PublicConfig {
   max_history_json_bytes: number;
   /** Upper bound on players per session. */
   max_players: number;
+  /** Minimum visible share (%) of a neighbour cell while drawing. */
+  editor_min_context_visible_pct: number;
 }
 
 /** Raw `GET /config` payload; limits are grouped under `limits`. */
 export interface PublicConfigResponse {
   polling_interval_seconds: number;
   autosave_interval_seconds: number;
+  editor_min_context_visible_pct?: number;
   limits: {
     min_canvas_size: number;
     max_canvas_size: number;

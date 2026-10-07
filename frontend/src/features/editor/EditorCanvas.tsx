@@ -33,6 +33,8 @@ interface Props {
   size: number;
   /** Draw the grey dashed context-area outline on the edited cell. */
   showContextArea: boolean;
+  /** Minimum visible share (%) of each neighbour cell while drawing. */
+  minContextVisiblePct: number;
   onStrokeComplete: (operation: DrawOperation) => void;
   onHoverContext: (cellId: string | null) => void;
 }
@@ -83,6 +85,7 @@ export default function EditorCanvas({
   color,
   size,
   showContextArea,
+  minContextVisiblePct,
   onStrokeComplete,
   onHoverContext,
 }: Props) {
@@ -93,21 +96,52 @@ export default function EditorCanvas({
   const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ width: 800, height: 600 });
 
-  const zoneWidth = contextCols * cellWidth;
-  const zoneHeight = contextRows * cellHeight;
   const cellOffsetX = (cellCol - originCol) * cellWidth;
   const cellOffsetY = (cellRow - originRow) * cellHeight;
 
-  // Fit the working area (the editable cell plus its context zone) into the
-  // viewport while keeping the edited cell centred. The required extent is
-  // measured from the cell centre to the farthest zone edge on each axis, so
-  // the whole zone stays visible. There is no upper clamp on purpose: the
-  // grey backdrop simply extends beyond the viewport and is clipped by the
-  // container.
+  // Standard rule: zoom so the edited cell plus a margin of
+  // `minContextVisiblePct` of a cell around it always fits, keeping the
+  // cell centred. The context zone itself must NOT fit fully while drawing:
+  // taking the min over the axes pins one axis to the required extent, so
+  // the neighbours along it are cut off to the configured minimum visible
+  // share. The other axis may show more (even an entire side neighbour),
+  // which is fine. There is no upper clamp on purpose: the grey backdrop
+  // extends beyond the viewport and is clipped by the container.
+  const visibleFraction =
+    Math.min(100, Math.max(0, minContextVisiblePct)) / 100;
+  let requiredHalfWidth = cellWidth * (0.5 + visibleFraction);
+  let requiredHalfHeight = cellHeight * (0.5 + visibleFraction);
+
+  // Exception for FILLED neighbours: their context — the slice of them
+  // inside the context figure, i.e. the part visible to this cell — must fit
+  // on screen entirely, so grow the required half-extent up to that slice.
+  // Unfilled neighbours follow the standard rule above.
+  const figureHalfWidth = contextShape?.halfWidth ?? cellWidth / 2;
+  const figureHalfHeight = contextShape?.halfHeight ?? cellHeight / 2;
+  for (const neighbour of contextCells) {
+    if (neighbour.status !== "filled") continue;
+    const colSpan = Math.abs(neighbour.col - cellCol);
+    const rowSpan = Math.abs(neighbour.row - cellRow);
+    // The neighbour spans [span - 0.5, span + 0.5] cells from the centre of
+    // the edited cell; the figure only overlaps it when it reaches that far.
+    if (colSpan > 0 && figureHalfWidth > cellWidth * (colSpan - 0.5)) {
+      requiredHalfWidth = Math.max(
+        requiredHalfWidth,
+        Math.min(figureHalfWidth, cellWidth * (colSpan + 0.5)),
+      );
+    }
+    if (rowSpan > 0 && figureHalfHeight > cellHeight * (rowSpan - 0.5)) {
+      requiredHalfHeight = Math.max(
+        requiredHalfHeight,
+        Math.min(figureHalfHeight, cellHeight * (rowSpan + 0.5)),
+      );
+    }
+  }
+
   const cellCentreX = cellOffsetX + cellWidth / 2;
   const cellCentreY = cellOffsetY + cellHeight / 2;
-  const requiredWidth = 2 * Math.max(cellCentreX, zoneWidth - cellCentreX);
-  const requiredHeight = 2 * Math.max(cellCentreY, zoneHeight - cellCentreY);
+  const requiredWidth = 2 * requiredHalfWidth;
+  const requiredHeight = 2 * requiredHalfHeight;
   const scale = Math.min(
     viewport.width / requiredWidth,
     viewport.height / requiredHeight,

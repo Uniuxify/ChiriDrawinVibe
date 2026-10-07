@@ -80,5 +80,7 @@ export async function fetchConfig(): Promise<PublicConfig> {
     max_ops_per_cell: limits.max_ops_per_cell,
     max_history_json_bytes: limits.max_history_json_bytes,
     max_players: limits.max_players ?? 10,
+    editor_min_context_visible_pct:
+      data.editor_min_context_visible_pct ?? 10,
   };
 }

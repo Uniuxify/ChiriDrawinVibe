@@ -21,7 +21,7 @@ import {
   fetchCellContext,
   fetchCellHistory,
 } from "../../api/cells";
-import { fetchSessionState } from "../../api/sessions";
+import { fetchConfig, fetchSessionState } from "../../api/sessions";
 import type { DrawOperation } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
 import { debug } from "../../shared/debug";
@@ -48,7 +48,7 @@ export default function CellEditorPage() {
   const [tool, setTool] = useState<EditorTool>("brush");
   const [color, setColor] = useState("#000000");
   const [size, setSize] = useState(4);
-  const [showContextArea, setShowContextArea] = useState(true);
+  const [showContextArea, setShowContextArea] = useState(false);
   const [history, setHistory] = useState<DrawOperation[]>([]);
   const [redoStack, setRedoStack] = useState<DrawOperation[]>([]);
   const [comment, setComment] = useState("");
@@ -84,6 +84,16 @@ export default function CellEditorPage() {
     enabled: Boolean(cellId),
     retry: false,
   });
+
+  // Public app config; shared cache key with the session-create page.
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: fetchConfig,
+    staleTime: Infinity,
+  });
+  /** Minimum visible share (%) of a neighbour cell while drawing. */
+  const minContextVisiblePct =
+    configQuery.data?.editor_min_context_visible_pct ?? 10;
 
   const session = stateQuery.data?.session;
   const cell = useMemo(
@@ -397,6 +407,7 @@ export default function CellEditorPage() {
           color={color}
           size={size}
           showContextArea={showContextArea}
+          minContextVisiblePct={minContextVisiblePct}
           onStrokeComplete={(operation) => {
             setHistory((current) => [...current, operation]);
             setRedoStack([]);

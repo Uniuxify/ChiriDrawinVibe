@@ -146,8 +146,7 @@ AUTH_USER_MODEL = "accounts.User"
 AUTH_PASSWORD_VALIDATORS = [
     {
         "NAME": (
-            "django.contrib.auth.password_validation"
-            ".UserAttributeSimilarityValidator"
+            "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
         )
     },
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -203,6 +202,8 @@ MAX_GRID = env_int("MAX_GRID", 100)
 MAX_OPS_PER_CELL = env_int("MAX_OPS_PER_CELL", 20000)
 MAX_HISTORY_JSON_BYTES = env_int("MAX_HISTORY_JSON_BYTES", 5_000_000)
 MIN_INTERVAL_SECONDS = env_int("MIN_INTERVAL_SECONDS", 0)
+#: Minimum visible share (%) of a neighbouring cell in the drawing editor.
+EDITOR_MIN_CONTEXT_VISIBLE_PCT = env_int("EDITOR_MIN_CONTEXT_VISIBLE_PCT", 10)
 #: Upper bound on players per session; keeps grid colouring search cheap.
 MAX_PLAYERS = env_int("MAX_PLAYERS", 10)
 
