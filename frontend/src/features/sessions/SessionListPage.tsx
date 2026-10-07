@@ -18,11 +18,7 @@ import {
   Link,
   Typography,
 } from "@mui/material";
-import {
-  deleteSession,
-  fetchMySessions,
-  fetchPublicFinished,
-} from "../../api/sessions";
+import { deleteSession, fetchMySessions } from "../../api/sessions";
 import type { SessionDTO } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
@@ -34,6 +30,12 @@ function statusColor(status: string): "success" | "default" | "info" {
   if (status === "finished") return "default";
   return "info";
 }
+
+/** Tags available for filtering the session lists. */
+const SPECIFIC_TAGS = ["your", "draft", "active", "finished"] as const;
+const FILTER_TAGS = ["all", ...SPECIFIC_TAGS] as const;
+
+type FilterTag = (typeof FILTER_TAGS)[number];
 
 /** Card representing one session in the list. */
 function SessionCard({
@@ -85,49 +87,14 @@ function SessionCard({
   );
 }
 
-/** A titled section holding a list of session cards. */
-function SessionBlock({
-  title,
-  sessions,
-  emptyText,
-  onDelete,
-}: {
-  title: string;
-  sessions: SessionDTO[];
-  emptyText: string;
-  onDelete?: (session: SessionDTO) => void;
-}) {
-  return (
-    <Box sx={{ mb: 4 }}>
-      <Typography variant="subtitle1" gutterBottom>
-        {title} ({sessions.length})
-      </Typography>
-      {sessions.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">
-          {emptyText}
-        </Typography>
-      ) : (
-        <Box
-          sx={{
-            display: "grid",
-            gap: 2,
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-          }}
-        >
-          {sessions.map((s) => (
-            <SessionCard key={s.id} session={s} onDelete={onDelete} />
-          ))}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-/** Landing screen with the three session blocks for the signed-in player. */
+/** Landing screen with the session list and its tag filter for the player. */
 export default function SessionListPage() {
   const [joinOpen, setJoinOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SessionDTO | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [activeTags, setActiveTags] = useState<Set<FilterTag>>(
+    () => new Set(FILTER_TAGS),
+  );
   const username = useAuthStore((s) => s.username);
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const myUserId = useAuthStore((s) => s.userId);
@@ -141,19 +108,12 @@ export default function SessionListPage() {
     refetchInterval: 5000,
   });
 
-  const { data: publicFinished } = useQuery({
-    queryKey: ["sessions", "public"],
-    queryFn: fetchPublicFinished,
-    enabled: isAdmin,
-  });
-
-  const drafts = data?.drafts ?? [];
-  const active = data?.active ?? [];
-  const finished = data?.finished ?? [];
-  const empty = drafts.length === 0 && active.length === 0 && finished.length === 0;
-  const ownedSessions = [...drafts, ...active, ...finished].filter(
-    (session) => session.owner === myUserId,
-  );
+  const allSessions = [
+    ...(data?.drafts ?? []),
+    ...(data?.active ?? []),
+    ...(data?.finished ?? []),
+  ];
+  const visibleSessions = allSessions.filter(matchesFilter);
 
   function logout() {
     clear();
@@ -180,6 +140,42 @@ export default function SessionListPage() {
       return;
     }
     setDeleteTarget(session);
+  }
+
+  /**
+   * Toggle a filter tag.
+   *
+   * Switching a specific tag off also leaves the "all" mode (otherwise
+   * everything would stay visible). Enabling "all" enables every other tag,
+   * and enabling the last specific tag turns "all" on automatically.
+   */
+  function toggleTag(tag: FilterTag) {
+    setActiveTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) {
+        next.delete(tag);
+        if (tag !== "all") next.delete("all");
+        return next;
+      }
+      next.add(tag);
+      if (tag === "all") {
+        for (const specific of SPECIFIC_TAGS) next.add(specific);
+      } else if (SPECIFIC_TAGS.every((t) => next.has(t))) {
+        next.add("all");
+      }
+      return next;
+    });
+  }
+
+  /**
+   * A session is visible while "all" is active or one of its own tags
+   * (status, ownership) is active.
+   */
+  function matchesFilter(session: SessionDTO): boolean {
+    if (activeTags.has("all")) return true;
+    if (session.owner === myUserId && activeTags.has("your")) return true;
+    const statusTag = session.status as FilterTag;
+    return FILTER_TAGS.includes(statusTag) && activeTags.has(statusTag);
   }
 
   return (
@@ -228,6 +224,19 @@ export default function SessionListPage() {
         </Button>
       </Box>
 
+      {/* Session filter tags: blue while active, grey once switched off. */}
+      <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
+        {FILTER_TAGS.map((tag) => (
+          <Chip
+            key={tag}
+            label={tag}
+            onClick={() => toggleTag(tag)}
+            color={activeTags.has(tag) ? "primary" : "default"}
+            sx={{ textTransform: "capitalize" }}
+          />
+        ))}
+      </Box>
+
       {isLoading && (
         <CircularProgress sx={{ display: "block", mx: "auto", mt: 8 }} />
       )}
@@ -256,44 +265,37 @@ export default function SessionListPage() {
         </Alert>
       )}
 
-      {!isLoading && error == null && empty && (
+      {!isLoading && error == null && allSessions.length === 0 && (
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           You are not a member of any session yet.
         </Typography>
       )}
 
-      {!isLoading && error == null && (
-        <>
-          <SessionBlock
-            title="Your Sessions"
-            sessions={ownedSessions}
-            emptyText="You have not created any session yet."
-            onDelete={requestDelete}
-          />
-          <SessionBlock
-            title="Drafts"
-            sessions={drafts}
-            emptyText="No draft sessions."
-          />
-          <SessionBlock
-            title="Active sessions"
-            sessions={active}
-            emptyText="No active sessions."
-          />
-          <SessionBlock
-            title="Finished sessions"
-            sessions={finished}
-            emptyText="No finished sessions yet."
-          />
-
-          {isAdmin && (
-            <SessionBlock
-              title="Public finished sessions (admin)"
-              sessions={publicFinished ?? []}
-              emptyText="No public finished sessions."
-            />
-          )}
-        </>
+      {!isLoading && error == null && allSessions.length > 0 && (
+        visibleSessions.length === 0 ? (
+          <Typography color="text.secondary" sx={{ mb: 2 }}>
+            No sessions match the selected tags.
+          </Typography>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gap: 2,
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              mb: 4,
+            }}
+          >
+            {visibleSessions.map((session) => (
+              <SessionCard
+                key={session.id}
+                session={session}
+                onDelete={
+                  session.owner === myUserId ? requestDelete : undefined
+                }
+              />
+            ))}
+          </Box>
+        )
       )}
 
       <Link component={RouterLink} to="/public" variant="body2">
