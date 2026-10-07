@@ -143,19 +143,28 @@ export default function ContextOverlay({
                 fill={FILLED_FILL}
                 listening={false}
               />
-              {cell.strokes.map((stroke, index) => (
-                <Line
-                  key={index}
-                  points={stroke.points}
-                  stroke={stroke.erase ? "#ffffff" : stroke.color}
-                  strokeWidth={stroke.size}
-                  lineCap="round"
-                  lineJoin="round"
-                  tension={0.3}
-                  globalCompositeOperation="source-over"
-                  listening={false}
-                />
-              ))}
+              {/* The drawing plane is infinite; only the neighbour's own
+                  cell rectangle is meaningful, so clip to it. */}
+              <Group
+                clipX={0}
+                clipY={0}
+                clipWidth={cellWidth}
+                clipHeight={cellHeight}
+              >
+                {cell.strokes.map((stroke, index) => (
+                  <Line
+                    key={index}
+                    points={stroke.points}
+                    stroke={stroke.erase ? "#ffffff" : stroke.color}
+                    strokeWidth={stroke.size}
+                    lineCap="round"
+                    lineJoin="round"
+                    tension={0.3}
+                    globalCompositeOperation="source-over"
+                    listening={false}
+                  />
+                ))}
+              </Group>
             </Group>
           );
         })}

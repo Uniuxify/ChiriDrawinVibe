@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { Box } from "@mui/material";
 import type Konva from "konva";
-import { Layer, Line, Rect, Stage, Text } from "react-konva";
+import { Group, Layer, Line, Rect, Stage, Text } from "react-konva";
 import { fetchCellHistory } from "../../api/cells";
 import type { CellDTO, SessionDTO } from "../../api/types";
 import { strokesFromHistory } from "../../shared/renderHistory";
@@ -185,21 +185,25 @@ export default function SessionCanvas({
                   onClick={() => onSelect(cell)}
                   onTap={() => onSelect(cell)}
                 />
-                {strokes.map((stroke, strokeIndex) => (
-                  <Line
-                    key={`${cell.id}-stroke-${strokeIndex}`}
-                    x={x}
-                    y={y}
-                    points={stroke.points}
-                    stroke={stroke.erase ? "#ffffff" : stroke.color}
-                    strokeWidth={stroke.size}
-                    lineCap="round"
-                    lineJoin="round"
-                    globalCompositeOperation="source-over"
-                    tension={0.3}
-                    listening={false}
-                  />
-                ))}
+                {/* The drawing plane is infinite; only the cell rectangle
+                    is meaningful, so clip the strokes to it. */}
+                <Group clipX={x} clipY={y} clipWidth={cellW} clipHeight={cellH}>
+                  {strokes.map((stroke, strokeIndex) => (
+                    <Line
+                      key={`${cell.id}-stroke-${strokeIndex}`}
+                      x={x}
+                      y={y}
+                      points={stroke.points}
+                      stroke={stroke.erase ? "#ffffff" : stroke.color}
+                      strokeWidth={stroke.size}
+                      lineCap="round"
+                      lineJoin="round"
+                      globalCompositeOperation="source-over"
+                      tension={0.3}
+                      listening={false}
+                    />
+                  ))}
+                </Group>
                 {!finished && isMine && cell.status === "empty" && (
                   <Text
                     x={x + 4}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Box } from "@mui/material";
-import { Layer, Line, Rect, Stage } from "react-konva";
+import { Group, Layer, Line, Rect, Stage } from "react-konva";
 import type Konva from "konva";
 import type { DrawOperation } from "../../api/types";
 import {
@@ -42,9 +42,20 @@ interface DraftStroke {
   erase: boolean;
 }
 
-/** Clamp a normalized coordinate into the [0, 1] range required by the API. */
-function clamp01(value: number): number {
-  return Math.min(1, Math.max(0, value));
+/** Lowest normalized coordinate accepted by the API: one cell beyond the edge. */
+const COORD_MIN = -1;
+/** Highest normalized coordinate accepted by the API: one cell beyond the edge. */
+const COORD_MAX = 2;
+
+/**
+ * Clamp a normalized coordinate into the range required by the API.
+ *
+ * The drawing plane is effectively infinite; only a one-cell margin around
+ * the cell is kept so the payload stays bounded. Everything outside the cell
+ * rectangle is clipped away when rendering.
+ */
+function clampCoord(value: number): number {
+  return Math.min(COORD_MAX, Math.max(COORD_MIN, value));
 }
 
 /** Clamp a relative stroke size into the (0, 1] range required by the API. */
@@ -127,35 +138,66 @@ export default function EditorCanvas({
       }
     : null;
 
-  /** Convert a stage pointer position into cell-local pixel coordinates. */
-  const pointerInCell = useCallback((): { x: number; y: number } | null => {
+  /**
+   * Convert a stage pointer position into cell-local pixel coordinates.
+   *
+   * The drawing plane is infinite: a stroke may start anywhere; only the
+   * cell rectangle is visible and everything outside it is clipped away.
+   */
+  const pointerInPlane = useCallback((): { x: number; y: number } | null => {
     const stage = stageRef.current;
     const pointer = stage?.getPointerPosition();
     if (!pointer) return null;
     const x = (pointer.x - offsetX) / scale - cellOffsetX;
     const y = (pointer.y - offsetY) / scale - cellOffsetY;
-    if (x < 0 || y < 0 || x > cellWidth || y > cellHeight) return null;
     return { x, y };
-  }, [cellOffsetX, cellOffsetY, cellHeight, cellWidth, offsetX, offsetY, scale]);
+  }, [cellOffsetX, cellOffsetY, offsetX, offsetY, scale]);
+
+  /**
+   * Convert client coordinates into cell-local pixel coordinates.
+   *
+   * The drawing plane is infinite: coordinates outside the cell are kept and
+   * clipped away when rendering, so a stroke never breaks at the cell edge.
+   */
+  const pointFromClient = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } | null => {
+      const element = containerRef.current;
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const x = (clientX - rect.left - offsetX) / scale - cellOffsetX;
+      const y = (clientY - rect.top - offsetY) / scale - cellOffsetY;
+      return { x, y };
+    },
+    [cellOffsetX, cellOffsetY, offsetX, offsetY, scale],
+  );
+
+  /** Append a point to the draft stroke in progress, if any. */
+  const appendPoint = useCallback((point: { x: number; y: number }) => {
+    const current = draftRef.current;
+    if (!current) return;
+    const next = {
+      points: [...current.points, point.x, point.y],
+      erase: current.erase,
+    };
+    draftRef.current = next;
+    setDraft(next);
+  }, []);
 
   function handleMouseDown() {
-    const point = pointerInCell();
+    // A stroke may start anywhere on the infinite plane; the cell rectangle
+    // is the only visible part and is enforced by clipping, not by input.
+    const point = pointerInPlane();
     if (!point) return;
     const next = { points: [point.x, point.y], erase: tool === "eraser" };
     draftRef.current = next;
     setDraft(next);
   }
 
+  /** Continue a touch stroke; touch events stay targeted at the stage. */
   function handleMouseMove() {
     if (!draftRef.current) return;
-    const point = pointerInCell();
-    if (!point) return;
-    const next = {
-      points: [...draftRef.current.points, point.x, point.y],
-      erase: draftRef.current.erase,
-    };
-    draftRef.current = next;
-    setDraft(next);
+    const point = pointerInPlane();
+    if (point) appendPoint(point);
   }
 
   function handleMouseUp() {
@@ -167,8 +209,8 @@ export default function EditorCanvas({
     const normalized: number[][] = [];
     for (let index = 0; index < current.points.length; index += 2) {
       normalized.push([
-        clamp01(current.points[index] / cellWidth),
-        clamp01(current.points[index + 1] / cellHeight),
+        clampCoord(current.points[index] / cellWidth),
+        clampCoord(current.points[index + 1] / cellHeight),
       ]);
     }
     onStrokeComplete({
@@ -179,6 +221,32 @@ export default function EditorCanvas({
       points: normalized,
     });
   }
+
+  // While a stroke is in progress, track the mouse over the whole window so
+  // the polyline stays continuous when the pointer leaves the cell or the
+  // stage. Only the cell rectangle is visible; the rest is clipped away.
+  const drawing = draft !== null;
+  useEffect(() => {
+    if (!drawing) return;
+    const handleMove = (event: MouseEvent) => {
+      if (event.buttons === 0) {
+        handleMouseUp();
+        return;
+      }
+      const point = pointFromClient(event.clientX, event.clientY);
+      if (point) appendPoint(point);
+    };
+    const handleUp = () => handleMouseUp();
+    const handleBlur = () => handleMouseUp();
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("blur", handleBlur);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("blur", handleBlur);
+    };
+  }, [drawing, appendPoint, pointFromClient, handleMouseUp]);
 
   return (
     <Box
@@ -196,9 +264,6 @@ export default function EditorCanvas({
         width={viewport.width}
         height={viewport.height}
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
         onTouchStart={handleMouseDown}
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
@@ -233,35 +298,44 @@ export default function EditorCanvas({
             cornerRadius={2}
             listening={false}
           />
-          {strokes.map((stroke, index) => (
-            <Line
-              key={index}
-              x={cellOffsetX}
-              y={cellOffsetY}
-              points={stroke.points}
-              stroke={stroke.erase ? "#ffffff" : stroke.color}
-              strokeWidth={stroke.size}
-              lineCap="round"
-              lineJoin="round"
-              globalCompositeOperation="source-over"
-              tension={0.3}
-              listening={false}
-            />
-          ))}
-          {draftStroke && (
-            <Line
-              x={cellOffsetX}
-              y={cellOffsetY}
-              points={draftStroke.points}
-              stroke={draftStroke.color}
-              strokeWidth={draftStroke.size}
-              lineCap="round"
-              lineJoin="round"
-              globalCompositeOperation="source-over"
-              tension={0.3}
-              listening={false}
-            />
-          )}
+          {/* Strokes live on an infinite plane; only the cell rectangle is
+              visible, so everything outside it is clipped away. */}
+          <Group
+            clipX={cellOffsetX}
+            clipY={cellOffsetY}
+            clipWidth={cellWidth}
+            clipHeight={cellHeight}
+          >
+            {strokes.map((stroke, index) => (
+              <Line
+                key={index}
+                x={cellOffsetX}
+                y={cellOffsetY}
+                points={stroke.points}
+                stroke={stroke.erase ? "#ffffff" : stroke.color}
+                strokeWidth={stroke.size}
+                lineCap="round"
+                lineJoin="round"
+                globalCompositeOperation="source-over"
+                tension={0.3}
+                listening={false}
+              />
+            ))}
+            {draftStroke && (
+              <Line
+                x={cellOffsetX}
+                y={cellOffsetY}
+                points={draftStroke.points}
+                stroke={draftStroke.color}
+                strokeWidth={draftStroke.size}
+                lineCap="round"
+                lineJoin="round"
+                globalCompositeOperation="source-over"
+                tension={0.3}
+                listening={false}
+              />
+            )}
+          </Group>
           {/* Grey dashed context-area outline, always on top of the cell. */}
           <ContextBoundary
             cellWidth={cellWidth}

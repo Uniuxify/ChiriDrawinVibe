@@ -13,6 +13,10 @@ COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
 ALLOWED_TYPES = {"stroke", "erase", "clear"}
 ALLOWED_TOOLS = {"brush", "eraser"}
 MAX_POINTS_PER_OPERATION = 2000
+# The drawing plane is infinite; the API accepts a one-cell margin around the
+# cell so the stored history stays bounded. Rendering clips to the cell.
+COORD_MIN = -1.0
+COORD_MAX = 2.0
 
 
 def validate_history(operations: object) -> list[dict]:
@@ -95,7 +99,10 @@ def _validate_operation(operation: object, index: int) -> dict:
         x, y = point
         if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
             raise ValidationError(f"Operation {index} has a non-numeric point.")
-        if not 0.0 <= float(x) <= 1.0 or not 0.0 <= float(y) <= 1.0:
+        in_range = COORD_MIN <= float(x) <= COORD_MAX and (
+            COORD_MIN <= float(y) <= COORD_MAX
+        )
+        if not in_range:
             raise ValidationError(f"Operation {index} has out-of-range coordinates.")
         normalized_points.append([float(x), float(y)])
 
