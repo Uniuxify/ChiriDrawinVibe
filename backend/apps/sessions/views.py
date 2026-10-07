@@ -387,6 +387,37 @@ class MarkResultViewedView(APIView):
         return Response({"result_viewed": True})
 
 
+class SetPictureRevealedView(APIView):
+    """Persist whether the whole picture should be shown on the next visit."""
+
+    def post(self, request: Request, session_id: int) -> Response:
+        """Set the ``revealed`` flag for the caller; idempotent.
+
+        Args:
+            request: The current request carrying ``revealed``.
+            session_id: Session primary key.
+
+        Returns:
+            A payload with the resulting ``picture_revealed`` flag.
+
+        Raises:
+            ConflictError: If the session is not finished yet.
+        """
+        session = _get_session(session_id, request.user)
+        if session.status != SessionStatus.FINISHED:
+            raise ConflictError("Only finished sessions have a picture.")
+        # Accept JSON booleans as well as form-encoded strings.
+        raw = request.data.get("revealed")
+        revealed = str(raw).strip().lower() in {"1", "true", "yes"}
+        result, _ = SessionResultView.objects.get_or_create(
+            session=session, user=request.user
+        )
+        if result.revealed != revealed:
+            result.revealed = revealed
+            result.save(update_fields=["revealed"])
+        return Response({"picture_revealed": revealed})
+
+
 class SessionStateView(APIView):
     """Expose a polling-friendly snapshot of the session state."""
 
@@ -426,6 +457,7 @@ class SessionStateView(APIView):
         iteration_payload, available_unlocks, can_unlock, next_unlock_at = (
             _unlock_state(session, request.user)
         )
+        result_view = session.result_views.filter(user=request.user).first()
 
         return Response(
             {
@@ -438,9 +470,8 @@ class SessionStateView(APIView):
                 "next_unlock_at": next_unlock_at,
                 "version": session.version,
                 "status": session.status,
-                "result_viewed": session.result_views.filter(
-                    user=request.user
-                ).exists(),
+                "result_viewed": result_view is not None,
+                "picture_revealed": bool(result_view and result_view.revealed),
                 "progress": {
                     "filled": filled,
                     "total": total,

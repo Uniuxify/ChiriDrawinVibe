@@ -15,6 +15,14 @@ export async function markSessionViewed(id: number): Promise<void> {
   await api.post(`/sessions/${id}/viewed`);
 }
 
+/** Persist whether the whole picture is shown for the caller on next visit. */
+export async function setSessionRevealed(
+  id: number,
+  revealed: boolean,
+): Promise<void> {
+  await api.post(`/sessions/${id}/reveal`, { revealed });
+}
+
 /** Fetch the caller's sessions grouped by lifecycle status. */
 export async function fetchMySessions(): Promise<MySessionsResponse> {
   const { data } = await api.get<MySessionsResponse>("/sessions/mine");

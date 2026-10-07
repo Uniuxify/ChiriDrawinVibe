@@ -28,6 +28,8 @@ const STATUS_FILL: Record<string, string> = {
 
 /** Translucent dark overlay drawn over the hovered cell. */
 const HOVER_FILL = "rgba(0, 0, 0, 0.35)";
+/** Duration of the "black disappears, image appears" reveal fade. */
+const REVEAL_FADE_SECONDS = 0.6;
 
 /**
  * Renders the session grid: cell states, drawings, ownership hints and hover
@@ -103,6 +105,77 @@ export default function SessionCanvas({
     })),
   });
 
+  const overlayRefs = useRef(new Map<string, Konva.Rect>());
+  // Desired cover opacity (0 = open, 1 = closed) per cell, driven by a
+  // single requestAnimationFrame loop. A hand-rolled loop is used instead of
+  // Konva's node.to() because that API returns void (no handle to cancel),
+  // which made reopening impossible after a hide.
+  const coverTargetsRef = useRef(new Map<string, number>());
+  const coverCellsRef = useRef(cells);
+  const rafRef = useRef<number | null>(null);
+  const lastTickRef = useRef(0);
+  const firstOverlaySync = useRef(true);
+
+  const tickCovers = () => {
+    const targets = coverTargetsRef.current;
+    let running = false;
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastTickRef.current) / 1000);
+    lastTickRef.current = now;
+    for (const cell of coverCellsRef.current) {
+      const rect = overlayRefs.current.get(cell.id);
+      const target = targets.get(cell.id);
+      if (!rect || target === undefined) continue;
+      const current = rect.opacity();
+      if (Math.abs(current - target) <= 0.001) {
+        rect.opacity(target);
+        continue;
+      }
+      running = true;
+      const step = dt / REVEAL_FADE_SECONDS;
+      rect.opacity(
+        current < target
+          ? Math.min(target, current + step)
+          : Math.max(target, current - step),
+      );
+    }
+    if (running) {
+      rafRef.current = requestAnimationFrame(tickCovers);
+    } else {
+      rafRef.current = null;
+    }
+  };
+
+  const ensureCoverLoop = () => {
+    if (rafRef.current != null) return;
+    lastTickRef.current = performance.now();
+    rafRef.current = requestAnimationFrame(tickCovers);
+  };
+
+  // Reveal animation: every cover always moves toward its latest target, so
+  // hiding mid-fade simply reverses the movement. The very first sync
+  // (initial state, possibly hydrated from the DB) applies instantly.
+  useEffect(() => {
+    if (!finished) return;
+    coverCellsRef.current = cells;
+    for (const cell of cells) {
+      const rect = overlayRefs.current.get(cell.id);
+      if (!rect) continue;
+      const open = (revealed?.has(cell.id) ?? false) || !!isAdminMode;
+      const target = open ? 0 : 1;
+      if (firstOverlaySync.current) rect.opacity(target);
+      coverTargetsRef.current.set(cell.id, target);
+    }
+    firstOverlaySync.current = false;
+    ensureCoverLoop();
+    return () => {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [finished, cells, revealed, isAdminMode]);
+
   return (
     <Box
       ref={containerRef}
@@ -136,13 +209,9 @@ export default function SessionCanvas({
             let fill = STATUS_FILL[cell.status] ?? "#ffffff";
 
             if (finished) {
-              // Closed cells stay dark until revealed by a click.
-              const open = (revealed?.has(cell.id) ?? false) || !!isAdminMode;
-              fill = open
-                ? cell.status === "filled"
-                  ? "#ffffff"
-                  : "#f5f5f5"
-                : "#212121";
+              // The dark cover of a closed cell is a separate animated
+              // overlay, so the base fill always uses the open background.
+              fill = cell.status === "filled" ? "#ffffff" : "#f5f5f5";
             } else if (cell.status === "empty" && !isMine) {
               // Other players' unfinished cells are black.
               fill = "#212121";
@@ -212,6 +281,25 @@ export default function SessionCanvas({
                     />
                   ))}
                 </Group>
+                {/* Dark cover of a closed finished cell; it fades out on
+                    reveal and snaps back when the picture is hidden. */}
+                {finished && (
+                  <Rect
+                    ref={(node) => {
+                      if (node) {
+                        overlayRefs.current.set(cell.id, node);
+                      } else {
+                        overlayRefs.current.delete(cell.id);
+                      }
+                    }}
+                    x={x}
+                    y={y}
+                    width={cellW}
+                    height={cellH}
+                    fill="#212121"
+                    listening={false}
+                  />
+                )}
                 {/* Hover feedback: the cell darkens and its comment shows
                     in the middle of the cell. */}
                 {hoveredCellId === cell.id && (

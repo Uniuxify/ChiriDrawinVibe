@@ -13,6 +13,7 @@ from apps.sessions.views import (
     SessionCreateView,
     SessionDetailView,
     SessionStateView,
+    SetPictureRevealedView,
 )
 
 CREATE_PAYLOAD = {
@@ -239,3 +240,58 @@ def test_mark_viewed_rejects_unfinished_session(django_user_model):
 
     assert response.status_code == 409
     assert not SessionResultView.objects.filter(session=session).exists()
+
+
+@pytest.mark.django_db
+def test_picture_revealed_flow(django_user_model):
+    """The reveal flag is stored per player and reported in the state."""
+    owner = django_user_model.objects.create_user("owner", "pw12345678")
+    player = django_user_model.objects.create_user("alice", "pw12345678")
+    other = django_user_model.objects.create_user("bob", "pw12345678")
+    session = _make_session(owner)
+    session.status = SessionStatus.FINISHED
+    session.save(update_fields=["status"])
+    SessionPlayer.objects.create(session=session, user=player)
+    SessionPlayer.objects.create(session=session, user=other)
+
+    factory = APIRequestFactory()
+
+    def state_for(user):
+        request = factory.get(f"/sessions/{session.id}/state")
+        force_authenticate(request, user=user)
+        return SessionStateView.as_view()(request, session_id=session.id)
+
+    assert state_for(player).data["picture_revealed"] is False
+
+    # Reveal is idempotent.
+    for _ in range(2):
+        request = factory.post(f"/sessions/{session.id}/reveal", {"revealed": True})
+        force_authenticate(request, user=player)
+        response = SetPictureRevealedView.as_view()(request, session_id=session.id)
+        assert response.status_code == 200
+        assert response.data["picture_revealed"] is True
+
+    assert state_for(player).data["picture_revealed"] is True
+    # Another player is unaffected.
+    assert state_for(other).data["picture_revealed"] is False
+
+    # Hiding persists again.
+    request = factory.post(f"/sessions/{session.id}/reveal", {"revealed": False})
+    force_authenticate(request, user=player)
+    response = SetPictureRevealedView.as_view()(request, session_id=session.id)
+    assert response.status_code == 200
+    assert state_for(player).data["picture_revealed"] is False
+
+
+@pytest.mark.django_db
+def test_picture_revealed_rejects_unfinished_session(django_user_model):
+    """Only finished sessions can toggle the reveal flag."""
+    owner = django_user_model.objects.create_user("owner", "pw12345678")
+    session = _make_session(owner)
+
+    factory = APIRequestFactory()
+    request = factory.post(f"/sessions/{session.id}/reveal", {"revealed": True})
+    force_authenticate(request, user=owner)
+    response = SetPictureRevealedView.as_view()(request, session_id=session.id)
+
+    assert response.status_code == 409

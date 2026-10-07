@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -21,6 +21,7 @@ import {
   finishSession,
   markSessionViewed,
   removePlayer,
+  setSessionRevealed,
   startSession,
 } from "../../api/sessions";
 import { unlockCell } from "../../api/cells";
@@ -48,6 +49,11 @@ export default function SessionDetailPage() {
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [finishedDismissed, setFinishedDismissed] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [openAllPhase, setOpenAllPhase] = useState<
+    "idle" | "cooling" | "instant" | "ready"
+  >("idle");
+  const [revealReady, setRevealReady] = useState(false);
+  const revealTimersRef = useRef<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const stateQuery = useQuery({
@@ -116,6 +122,38 @@ export default function SessionDetailPage() {
     if (!pendingFinishedModal) return;
     markSessionViewed(sessionId).catch(() => undefined);
   }, [pendingFinishedModal, sessionId]);
+
+  // Hydrate the reveal state from the DB once, before the canvas mounts:
+  // when the player left the picture revealed, every cell starts open
+  // without the fade animation.
+  useLayoutEffect(() => {
+    const data = stateQuery.data;
+    if (data == null || revealReady) return;
+    if (data.session.status === "finished" && data.picture_revealed) {
+      setRevealed(new Set(data.cells.map((cell) => cell.id)));
+    }
+    setRevealReady(true);
+  }, [stateQuery.data, revealReady]);
+
+  // Remember that the player has opened the whole picture (idempotent).
+  const allRevealedNow =
+    stateQuery.data != null &&
+    stateQuery.data.session.status === "finished" &&
+    stateQuery.data.cells.length > 0 &&
+    revealed.size >= stateQuery.data.cells.length;
+  useEffect(() => {
+    if (!allRevealedNow) return;
+    setSessionRevealed(sessionId, true).catch(() => undefined);
+  }, [allRevealedNow, sessionId]);
+
+  // Stop any running reveal cascade when the page unmounts.
+  useEffect(
+    () => () => {
+      for (const timer of revealTimersRef.current) window.clearTimeout(timer);
+      revealTimersRef.current = [];
+    },
+    [],
+  );
 
   if (stateQuery.isLoading) {
     return <Typography sx={{ p: 3 }}>Loading session…</Typography>;
@@ -196,6 +234,64 @@ export default function SessionDetailPage() {
       return;
     }
     setDeleteConfirmOpen(true);
+  }
+
+  /** Total cascade time: ~5s for 16 cells, growing logarithmically. */
+  function cascadeTotalMs(count: number): number {
+    return (5000 * Math.log(Math.max(count, 2))) / Math.log(16);
+  }
+
+  function clearRevealTimers() {
+    for (const timer of revealTimersRef.current) window.clearTimeout(timer);
+    revealTimersRef.current = [];
+  }
+
+  /**
+   * Reveal the remaining cells one by one: the first one right away, the
+   * rest spread evenly across the logarithmic total time.
+   */
+  function handleOpenAll() {
+    const remaining = cells
+      .filter((cell) => !revealed.has(cell.id))
+      .sort((a, b) => a.row - b.row || a.col - b.col)
+      .map((cell) => cell.id);
+    if (remaining.length === 0) return;
+    clearRevealTimers();
+    const step =
+      remaining.length > 1
+        ? cascadeTotalMs(remaining.length) / (remaining.length - 1)
+        : 0;
+    remaining.forEach((cellId, index) => {
+      const timer = window.setTimeout(() => {
+        setRevealed((prev) => {
+          const next = new Set(prev);
+          next.add(cellId);
+          return next;
+        });
+      }, step * index);
+      revealTimersRef.current.push(timer);
+    });
+    // The label switches right away; the button stays disabled for half a
+    // second before "Open instantly" becomes clickable.
+    setOpenAllPhase("instant");
+    revealTimersRef.current.push(
+      window.setTimeout(() => setOpenAllPhase("ready"), 500),
+    );
+  }
+
+  /** Reveal every remaining cell at the same time. */
+  function handleOpenInstantly() {
+    clearRevealTimers();
+    setRevealed(new Set(cells.map((cell) => cell.id)));
+    setOpenAllPhase("idle");
+  }
+
+  /** Hide the picture again; the DB remembers it for the next visit. */
+  function handleHidePicture() {
+    clearRevealTimers();
+    setRevealed(new Set());
+    setOpenAllPhase("idle");
+    setSessionRevealed(sessionId, false).catch(() => undefined);
   }
 
   function handleSelect(cell: CellDTO) {
@@ -370,6 +466,26 @@ export default function SessionDetailPage() {
             Finish early
           </Button>
         )}
+        {finished && !allRevealedNow && (
+          <Button
+            variant="contained"
+            onClick={
+              openAllPhase === "instant" || openAllPhase === "ready"
+                ? handleOpenInstantly
+                : handleOpenAll
+            }
+            disabled={openAllPhase === "cooling" || openAllPhase === "instant"}
+          >
+            {openAllPhase === "idle" || openAllPhase === "cooling"
+              ? "Open All"
+              : "Open instantly"}
+          </Button>
+        )}
+        {finished && allRevealedNow && (
+          <Button variant="outlined" onClick={handleHidePicture}>
+            Hide picture
+          </Button>
+        )}
       </Box>
 
       <Box
@@ -382,14 +498,16 @@ export default function SessionDetailPage() {
         }}
       >
         <Box sx={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-          <SessionCanvas
-            session={session}
-            cells={cells}
-            myUserId={myUserId}
-            onSelect={handleSelect}
-            revealed={revealed}
-            isAdminMode={adminMode && isAdmin}
-          />
+          {revealReady && (
+            <SessionCanvas
+              session={session}
+              cells={cells}
+              myUserId={myUserId}
+              onSelect={handleSelect}
+              revealed={revealed}
+              isAdminMode={adminMode && isAdmin}
+            />
+          )}
         </Box>
         <Box
           sx={{ width: 260, flexShrink: 0, overflowY: "auto", minHeight: 0 }}

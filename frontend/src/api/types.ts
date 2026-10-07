@@ -105,6 +105,8 @@ export interface SessionStateDTO {
   next_unlock_at: string | null;
   /** Whether the caller has already seen the finished result modal. */
   result_viewed?: boolean;
+  /** Whether the whole picture should be shown without the reveal flow. */
+  picture_revealed?: boolean;
   version?: number;
   status?: SessionStatus;
   progress?: { filled: number; total: number; percent: number };

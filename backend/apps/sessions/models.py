@@ -153,12 +153,14 @@ class SessionPlayer(models.Model):
 
 
 class SessionResultView(models.Model):
-    """Records that a user has already seen a finished session's result.
+    """Records how a user saw a finished session's result.
 
     Attributes:
         session: The finished session that was viewed.
         user: The user who saw the result.
         viewed_at: Timestamp of the first view.
+        revealed: Whether the whole picture should be shown on the next
+            visit; cleared when the user hides the picture.
     """
 
     session = models.ForeignKey(
@@ -168,6 +170,7 @@ class SessionResultView(models.Model):
         User, on_delete=models.CASCADE, related_name="viewed_results"
     )
     viewed_at = models.DateTimeField(auto_now_add=True)
+    revealed = models.BooleanField(default=False)
 
     class Meta:
         db_table = "sessions_result_view"

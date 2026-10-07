@@ -14,6 +14,7 @@ from apps.sessions.views import (
     SessionDetailView,
     SessionPlayerView,
     SessionStateView,
+    SetPictureRevealedView,
     StartSessionView,
 )
 
@@ -60,5 +61,10 @@ urlpatterns = [
         "sessions/<int:session_id>/viewed",
         MarkResultViewedView.as_view(),
         name="session-result-viewed",
+    ),
+    path(
+        "sessions/<int:session_id>/reveal",
+        SetPictureRevealedView.as_view(),
+        name="session-picture-revealed",
     ),
 ]
