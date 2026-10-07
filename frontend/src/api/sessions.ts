@@ -67,6 +67,22 @@ export async function fetchIteration(id: number): Promise<IterationDTO | null> {
   return data;
 }
 
+/** Delete a session; only the owner may do this. */
+export async function deleteSession(id: number): Promise<void> {
+  await api.delete(`/sessions/${id}`);
+}
+
+/** Remove a player from a session; only the owner may do this. */
+export async function removePlayer(
+  sessionId: number,
+  userId: number,
+): Promise<SessionDTO> {
+  const { data } = await api.delete<SessionDTO>(
+    `/sessions/${sessionId}/players/${userId}`,
+  );
+  return data;
+}
+
 export async function fetchConfig(): Promise<PublicConfig> {
   const { data } = await api.get<PublicConfigResponse>("/config");
   const limits = data.limits;

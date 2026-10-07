@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link as RouterLink, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Box,
@@ -10,11 +10,21 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Link,
   Typography,
 } from "@mui/material";
-import { fetchMySessions, fetchPublicFinished } from "../../api/sessions";
+import {
+  deleteSession,
+  fetchMySessions,
+  fetchPublicFinished,
+} from "../../api/sessions";
 import type { SessionDTO } from "../../api/types";
+import { extractApiMessage } from "../../shared/apiError";
 import { useAuthStore } from "../../store/auth";
 import JoinDialog from "./JoinDialog";
 
@@ -26,7 +36,13 @@ function statusColor(status: string): "success" | "default" | "info" {
 }
 
 /** Card representing one session in the list. */
-function SessionCard({ session }: { session: SessionDTO }) {
+function SessionCard({
+  session,
+  onDelete,
+}: {
+  session: SessionDTO;
+  onDelete?: (session: SessionDTO) => void;
+}) {
   const joined = session.players?.length;
   const playersLabel =
     joined === undefined
@@ -54,6 +70,16 @@ function SessionCard({ session }: { session: SessionDTO }) {
         >
           Open
         </Button>
+        {onDelete && (
+          <Button
+            size="small"
+            color="error"
+            onClick={() => onDelete(session)}
+            sx={{ ml: "auto" }}
+          >
+            Delete
+          </Button>
+        )}
       </CardActions>
     </Card>
   );
@@ -64,10 +90,12 @@ function SessionBlock({
   title,
   sessions,
   emptyText,
+  onDelete,
 }: {
   title: string;
   sessions: SessionDTO[];
   emptyText: string;
+  onDelete?: (session: SessionDTO) => void;
 }) {
   return (
     <Box sx={{ mb: 4 }}>
@@ -87,7 +115,7 @@ function SessionBlock({
           }}
         >
           {sessions.map((s) => (
-            <SessionCard key={s.id} session={s} />
+            <SessionCard key={s.id} session={s} onDelete={onDelete} />
           ))}
         </Box>
       )}
@@ -98,10 +126,14 @@ function SessionBlock({
 /** Landing screen with the three session blocks for the signed-in player. */
 export default function SessionListPage() {
   const [joinOpen, setJoinOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SessionDTO | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const username = useAuthStore((s) => s.username);
   const isAdmin = useAuthStore((s) => s.isAdmin);
+  const myUserId = useAuthStore((s) => s.userId);
   const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["sessions", "mine"],
@@ -119,10 +151,35 @@ export default function SessionListPage() {
   const active = data?.active ?? [];
   const finished = data?.finished ?? [];
   const empty = drafts.length === 0 && active.length === 0 && finished.length === 0;
+  const ownedSessions = [...drafts, ...active, ...finished].filter(
+    (session) => session.owner === myUserId,
+  );
 
   function logout() {
     clear();
     navigate("/login");
+  }
+
+  const deleteMut = useMutation({
+    mutationFn: (session: SessionDTO) => deleteSession(session.id),
+    onSuccess: () => {
+      setDeleteTarget(null);
+      setActionError(null);
+      void queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
+    },
+    onError: (err) => {
+      setDeleteTarget(null);
+      setActionError(extractApiMessage(err, "Could not delete the session."));
+    },
+  });
+
+  /** Drafts vanish immediately; every other state asks for confirmation. */
+  function requestDelete(session: SessionDTO) {
+    if (session.status === "draft") {
+      deleteMut.mutate(session);
+      return;
+    }
+    setDeleteTarget(session);
   }
 
   return (
@@ -137,6 +194,16 @@ export default function SessionListPage() {
       >
         <Typography variant="h5">ChiriDrawin</Typography>
         <Box sx={{ display: "flex", gap: 2, alignItems: "center" }}>
+          {isAdmin && (
+            <Button
+              size="small"
+              variant="outlined"
+              component={RouterLink}
+              to="/accounts"
+            >
+              Accounts
+            </Button>
+          )}
           <Typography variant="body2">{username}</Typography>
           <Button size="small" onClick={logout}>
             Sign out
@@ -145,11 +212,9 @@ export default function SessionListPage() {
       </Box>
 
       <Box sx={{ display: "flex", gap: 1, mb: 2 }}>
-        {isAdmin && (
-          <Button variant="contained" component={RouterLink} to="/sessions/new">
-            New session
-          </Button>
-        )}
+        <Button variant="contained" component={RouterLink} to="/sessions/new">
+          New session
+        </Button>
         <Button variant="outlined" onClick={() => setJoinOpen(true)}>
           Join by code
         </Button>
@@ -181,6 +246,16 @@ export default function SessionListPage() {
         </Alert>
       )}
 
+      {actionError != null && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          onClose={() => setActionError(null)}
+        >
+          {actionError}
+        </Alert>
+      )}
+
       {!isLoading && error == null && empty && (
         <Typography color="text.secondary" sx={{ mb: 2 }}>
           You are not a member of any session yet.
@@ -189,6 +264,12 @@ export default function SessionListPage() {
 
       {!isLoading && error == null && (
         <>
+          <SessionBlock
+            title="Your Sessions"
+            sessions={ownedSessions}
+            emptyText="You have not created any session yet."
+            onDelete={requestDelete}
+          />
           <SessionBlock
             title="Drafts"
             sessions={drafts}
@@ -218,6 +299,31 @@ export default function SessionListPage() {
       <Link component={RouterLink} to="/public" variant="body2">
         Browse public finished sessions as a spectator
       </Link>
+
+      {/* Session deletion confirmation (never shown for drafts) */}
+      <Dialog
+        open={deleteTarget != null}
+        onClose={() => setDeleteTarget(null)}
+      >
+        <DialogTitle>Delete this session?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            “{deleteTarget?.name}” and all of its cells will be permanently
+            removed. This action is irreversible.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            disabled={deleteMut.isPending}
+            onClick={() => deleteTarget && deleteMut.mutate(deleteTarget)}
+          >
+            {deleteMut.isPending ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <JoinDialog open={joinOpen} onClose={() => setJoinOpen(false)} />
     </Box>

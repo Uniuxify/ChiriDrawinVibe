@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from django.contrib.auth import get_user_model
+from django.db.models import Count
+from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -14,6 +16,8 @@ from apps.accounts.serializers import (
     RegisterSerializer,
     UserSerializer,
 )
+from apps.common.errors import NotFoundError, PermissionDeniedError
+from apps.common.permissions import IsAdmin
 
 User = get_user_model()
 
@@ -89,3 +93,72 @@ class MeView(APIView):
             Serialized current user.
         """
         return Response(UserSerializer(request.user).data)
+
+
+class UserListView(APIView):
+    """List every user together with session statistics (admin only)."""
+
+    permission_classes = (IsAdmin,)
+
+    def get(self, request: Request) -> Response:
+        """Return users with their session counts.
+
+        Args:
+            request: The current request.
+
+        Returns:
+            A list of users with registration dates and the number of
+            sessions they own and participate in.
+        """
+        users = User.objects.annotate(
+            owned_sessions_count=Count("owned_sessions", distinct=True),
+            player_sessions_count=Count("session_participations", distinct=True),
+        ).order_by("username")
+
+        return Response(
+            [
+                {
+                    "id": user.id,
+                    "username": user.username,
+                    "is_admin": user.is_admin,
+                    "created_at": user.created_at.isoformat(),
+                    "owned_sessions_count": user.owned_sessions_count,
+                    "player_sessions_count": user.player_sessions_count,
+                }
+                for user in users
+            ]
+        )
+
+
+class UserDetailView(APIView):
+    """Delete a user account (admin only)."""
+
+    permission_classes = (IsAdmin,)
+
+    def delete(self, request: Request, user_id: int) -> Response:
+        """Delete the target user.
+
+        Args:
+            request: The current request.
+            user_id: Identifier of the user to delete.
+
+        Returns:
+            An empty 204 response.
+
+        Raises:
+            NotFoundError: If no such user exists.
+            PermissionDeniedError: If the target is an administrator or the
+                caller tries to delete their own account.
+        """
+        try:
+            user = User.objects.get(pk=user_id)
+        except User.DoesNotExist as exc:
+            raise NotFoundError("User not found.") from exc
+
+        if user.is_admin:
+            raise PermissionDeniedError("Administrators cannot be deleted.")
+        if user.id == request.user.id:
+            raise PermissionDeniedError("You cannot delete your own account.")
+
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

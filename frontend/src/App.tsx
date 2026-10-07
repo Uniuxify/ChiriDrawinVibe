@@ -5,6 +5,7 @@ import RegisterPage from "./features/auth/RegisterPage";
 import SessionListPage from "./features/sessions/SessionListPage";
 import SessionCreatePage from "./features/sessions/SessionCreatePage";
 import SessionDetailPage from "./features/sessions/SessionDetailPage";
+import AccountsPage from "./features/accounts/AccountsPage";
 import CellEditorPage from "./features/editor/CellEditorPage";
 import PublicListPage from "./features/viewer/PublicListPage";
 import DebugPanel from "./features/debug/DebugPanel";
@@ -34,6 +35,14 @@ export default function App() {
         element={
           <RequireAuth>
             <SessionCreatePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/accounts"
+        element={
+          <RequireAuth>
+            <AccountsPage />
           </RequireAuth>
         }
       />

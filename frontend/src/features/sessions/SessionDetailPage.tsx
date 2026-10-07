@@ -16,8 +16,10 @@ import {
   Typography,
 } from "@mui/material";
 import {
+  deleteSession,
   fetchSessionState,
   finishSession,
+  removePlayer,
   startSession,
 } from "../../api/sessions";
 import { unlockCell } from "../../api/cells";
@@ -44,6 +46,7 @@ export default function SessionDetailPage() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [startConfirmOpen, setStartConfirmOpen] = useState(false);
   const [finishedDismissed, setFinishedDismissed] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const stateQuery = useQuery({
@@ -81,6 +84,25 @@ export default function SessionDetailPage() {
       setConfirmOpen(false);
       setError(extractApiMessage(e));
     },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: () => deleteSession(sessionId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
+      navigate("/");
+    },
+    onError: (e) => {
+      setDeleteConfirmOpen(false);
+      setError(extractApiMessage(e));
+    },
+  });
+
+  const removePlayerMut = useMutation({
+    mutationFn: (userId: number) => removePlayer(sessionId, userId),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] }),
+    onError: (e) => setError(extractApiMessage(e)),
   });
 
   if (stateQuery.isLoading) {
@@ -131,6 +153,7 @@ export default function SessionDetailPage() {
   const finishedModal = finished && !finishedDismissed && revealed.size === 0;
   const joinedPlayers = session.players ?? [];
   const joinedCount = joinedPlayers.length;
+  const isOwner = session.owner === myUserId;
 
   function openEditor(cellId: string) {
     navigate(`/sessions/${sessionId}/cells/${cellId}`);
@@ -150,6 +173,15 @@ export default function SessionDetailPage() {
   function confirmEarlyStart() {
     setStartConfirmOpen(false);
     startMut.mutate();
+  }
+
+  /** Drafts are deleted right away; anything else asks for confirmation. */
+  function handleDeleteSession() {
+    if (session.status === "draft") {
+      deleteMut.mutate();
+      return;
+    }
+    setDeleteConfirmOpen(true);
   }
 
   function handleSelect(cell: CellDTO) {
@@ -241,6 +273,16 @@ export default function SessionDetailPage() {
           {session.is_public && <Chip label="public" size="small" />}
         </Box>
         <Box sx={{ display: "flex", gap: 1 }}>
+          {isOwner && (
+            <Button
+              variant="outlined"
+              color="error"
+              onClick={handleDeleteSession}
+              disabled={deleteMut.isPending}
+            >
+              {deleteMut.isPending ? "Deleting…" : "Delete session"}
+            </Button>
+          )}
           <Button variant="outlined" onClick={() => setAdminMode((v) => !v)}>
             {adminMode ? "User mode" : "Admin mode"}
           </Button>
@@ -295,7 +337,7 @@ export default function SessionDetailPage() {
             Next unlock: {new Date(next_unlock_at).toLocaleTimeString()}
           </Typography>
         )}
-        {session.status === "draft" && isAdmin && (
+        {session.status === "draft" && isOwner && (
           <Button
             variant="contained"
             onClick={handleStart}
@@ -304,7 +346,7 @@ export default function SessionDetailPage() {
             {startMut.isPending ? "Starting…" : "Start session"}
           </Button>
         )}
-        {session.status === "active" && isAdmin && (
+        {session.status === "active" && isOwner && (
           <Button
             variant="outlined"
             color="error"
@@ -346,9 +388,33 @@ export default function SessionDetailPage() {
             Players: {joinedCount} joined (max {session.players_count})
           </Typography>
           {joinedCount > 0 && (
-            <Typography variant="body2" color="text.secondary">
-              {joinedPlayers.map((player) => player.username).join(", ")}
-            </Typography>
+            <Box sx={{ mt: 0.5 }}>
+              {joinedPlayers.map((player) => (
+                <Box
+                  key={player.user_id}
+                  sx={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <Typography variant="body2" color="text.secondary">
+                    {player.username}
+                    {!player.is_active && " (removed)"}
+                  </Typography>
+                  {isOwner && session.status !== "finished" && (
+                    <Button
+                      size="small"
+                      color="error"
+                      disabled={removePlayerMut.isPending}
+                      onClick={() => removePlayerMut.mutate(player.user_id)}
+                    >
+                      ✕
+                    </Button>
+                  )}
+                </Box>
+              ))}
+            </Box>
           )}
           {session.status === "draft" && joinedCount < session.players_count && (
             <Typography variant="body2" color="warning.main">
@@ -414,6 +480,31 @@ export default function SessionDetailPage() {
             disabled={startMut.isPending}
           >
             {startMut.isPending ? "Starting…" : "Start early"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Session deletion confirmation (never shown for drafts) */}
+      <Dialog
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+      >
+        <DialogTitle>Delete this session?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The session and all of its cells will be permanently removed. This
+            action is irreversible.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => deleteMut.mutate()}
+            disabled={deleteMut.isPending}
+          >
+            {deleteMut.isPending ? "Deleting…" : "Delete"}
           </Button>
         </DialogActions>
       </Dialog>

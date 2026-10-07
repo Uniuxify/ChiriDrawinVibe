@@ -17,6 +17,16 @@ export interface AuthResponse {
   tokens: TokenPair;
 }
 
+/** Admin-facing user row with session statistics. */
+export interface UserAdminDTO {
+  id: number;
+  username: string;
+  is_admin: boolean;
+  created_at: string;
+  owned_sessions_count: number;
+  player_sessions_count: number;
+}
+
 export type SessionStatus = "draft" | "active" | "finished" | "deleted";
 export type ContextShape = "rectangle" | "circle";
 export type ContextRadiusMode = "min" | "max" | "percent";

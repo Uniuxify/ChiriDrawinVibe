@@ -10,7 +10,6 @@ from rest_framework.views import APIView
 
 from apps.common.enums import CellStatus, IterationState, SessionStatus
 from apps.common.errors import ConflictError, NotFoundError, PermissionDeniedError
-from apps.common.permissions import IsAdmin
 from apps.iterations.services import dispatch_render
 from apps.sessions.models import GameSession, SessionPlayer
 from apps.sessions.serializers import (
@@ -108,9 +107,13 @@ class MySessionsView(APIView):
         """
         user = request.user
         sessions = (
-            GameSession.objects.filter(owner=user)
-            | GameSession.objects.filter(players__user=user)
-        ).distinct().prefetch_related("players__user")
+            (
+                GameSession.objects.filter(owner=user)
+                | GameSession.objects.filter(players__user=user)
+            )
+            .distinct()
+            .prefetch_related("players__user")
+        )
 
         active = [s for s in sessions if s.status == SessionStatus.ACTIVE]
         finished = [s for s in sessions if s.status == SessionStatus.FINISHED]
@@ -146,7 +149,7 @@ class PublicFinishedSessionsView(APIView):
 
 
 class SessionCreateView(APIView):
-    """Create a new session draft (admin only)."""
+    """Create a new session draft (any signed-in user)."""
 
     def post(self, request: Request) -> Response:
         """Create a session owned by the caller.
@@ -157,9 +160,6 @@ class SessionCreateView(APIView):
         Returns:
             The serialized created session.
         """
-        if not request.user.is_admin:
-            raise PermissionDeniedError("Only administrators may create sessions.")
-
         serializer = SessionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         session = serializer.save(owner=request.user)
@@ -167,7 +167,7 @@ class SessionCreateView(APIView):
 
 
 class SessionDetailView(APIView):
-    """Retrieve and update a single session."""
+    """Retrieve, update and delete a single session."""
 
     def get(self, request: Request, session_id: int) -> Response:
         """Return a session visible to the caller.
@@ -213,6 +213,21 @@ class SessionDetailView(APIView):
         session.touch()
         session.save(update_fields=["version"])
         return Response(SessionSerializer(session).data)
+
+    def delete(self, request: Request, session_id: int) -> Response:
+        """Delete a session and everything that cascades from it.
+
+        Args:
+            request: The current request.
+            session_id: Session primary key.
+
+        Returns:
+            An empty 204 response.
+        """
+        session = _get_session(session_id, request.user)
+        _require_owner(session, request.user)
+        session.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SessionPlayerView(APIView):
@@ -313,8 +328,6 @@ class JoinSessionView(APIView):
 class StartSessionView(APIView):
     """Start a draft session (owner only)."""
 
-    permission_classes = (IsAdmin,)
-
     def post(self, request: Request, session_id: int) -> Response:
         """Start the session and distribute cells.
 
@@ -333,8 +346,6 @@ class StartSessionView(APIView):
 
 class FinishSessionView(APIView):
     """Finish an active session early (owner only)."""
-
-    permission_classes = (IsAdmin,)
 
     def post(self, request: Request, session_id: int) -> Response:
         """Finish the session.
