@@ -6,8 +6,14 @@ import pytest
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from apps.accounts.views import UserDetailView, UserListView
-from apps.sessions.models import GameSession
-from apps.sessions.views import SessionCreateView, SessionDetailView
+from apps.common.enums import SessionStatus
+from apps.sessions.models import GameSession, SessionPlayer, SessionResultView
+from apps.sessions.views import (
+    MarkResultViewedView,
+    SessionCreateView,
+    SessionDetailView,
+    SessionStateView,
+)
 
 CREATE_PAYLOAD = {
     "name": "New session",
@@ -175,3 +181,61 @@ def test_admin_cannot_delete_self(django_user_model):
 
     assert response.status_code == 403
     assert django_user_model.objects.filter(pk=admin.id).exists()
+
+
+@pytest.mark.django_db
+def test_result_viewed_flow(django_user_model):
+    """Marking the result as viewed persists and shows up in the state."""
+    owner = django_user_model.objects.create_user("owner", "pw12345678")
+    player = django_user_model.objects.create_user("alice", "pw12345678")
+    session = _make_session(owner)
+    session.status = SessionStatus.FINISHED
+    session.save(update_fields=["status"])
+    SessionPlayer.objects.create(session=session, user=player)
+
+    factory = APIRequestFactory()
+
+    # Before marking, the state reports the result as unseen.
+    state_request = factory.get(f"/sessions/{session.id}/state")
+    force_authenticate(state_request, user=player)
+    state = SessionStateView.as_view()(state_request, session_id=session.id)
+    assert state.status_code == 200
+    assert state.data["result_viewed"] is False
+
+    # Marking is idempotent.
+    for _ in range(2):
+        mark_request = factory.post(f"/sessions/{session.id}/viewed")
+        force_authenticate(mark_request, user=player)
+        response = MarkResultViewedView.as_view()(mark_request, session_id=session.id)
+        assert response.status_code == 200
+        assert response.data["result_viewed"] is True
+
+    assert SessionResultView.objects.filter(session=session, user=player).count() == 1
+
+    state_request = factory.get(f"/sessions/{session.id}/state")
+    force_authenticate(state_request, user=player)
+    state = SessionStateView.as_view()(state_request, session_id=session.id)
+    assert state.data["result_viewed"] is True
+
+    # Another participant has not seen it yet.
+    other = django_user_model.objects.create_user("bob", "pw12345678")
+    SessionPlayer.objects.create(session=session, user=other)
+    state_request = factory.get(f"/sessions/{session.id}/state")
+    force_authenticate(state_request, user=other)
+    state = SessionStateView.as_view()(state_request, session_id=session.id)
+    assert state.data["result_viewed"] is False
+
+
+@pytest.mark.django_db
+def test_mark_viewed_rejects_unfinished_session(django_user_model):
+    """Only finished sessions can be marked as viewed."""
+    owner = django_user_model.objects.create_user("owner", "pw12345678")
+    session = _make_session(owner)
+
+    factory = APIRequestFactory()
+    request = factory.post(f"/sessions/{session.id}/viewed")
+    force_authenticate(request, user=owner)
+    response = MarkResultViewedView.as_view()(request, session_id=session.id)
+
+    assert response.status_code == 409
+    assert not SessionResultView.objects.filter(session=session).exists()

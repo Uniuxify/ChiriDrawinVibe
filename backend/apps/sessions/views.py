@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from apps.common.enums import CellStatus, IterationState, SessionStatus
 from apps.common.errors import ConflictError, NotFoundError, PermissionDeniedError
 from apps.iterations.services import dispatch_render
-from apps.sessions.models import GameSession, SessionPlayer
+from apps.sessions.models import GameSession, SessionPlayer, SessionResultView
 from apps.sessions.serializers import (
     AddPlayerSerializer,
     SessionCreateSerializer,
@@ -367,6 +367,26 @@ class FinishSessionView(APIView):
         return Response(SessionSerializer(session).data)
 
 
+class MarkResultViewedView(APIView):
+    """Record that the caller has already seen a finished session's result."""
+
+    def post(self, request: Request, session_id: int) -> Response:
+        """Mark the result as viewed; idempotent.
+
+        Args:
+            request: The current request.
+            session_id: Session primary key.
+
+        Returns:
+            A payload with ``result_viewed`` set to ``True``.
+        """
+        session = _get_session(session_id, request.user)
+        if session.status != SessionStatus.FINISHED:
+            raise ConflictError("Only finished sessions have a result to view.")
+        SessionResultView.objects.get_or_create(session=session, user=request.user)
+        return Response({"result_viewed": True})
+
+
 class SessionStateView(APIView):
     """Expose a polling-friendly snapshot of the session state."""
 
@@ -418,6 +438,9 @@ class SessionStateView(APIView):
                 "next_unlock_at": next_unlock_at,
                 "version": session.version,
                 "status": session.status,
+                "result_viewed": session.result_views.filter(
+                    user=request.user
+                ).exists(),
                 "progress": {
                     "filled": filled,
                     "total": total,

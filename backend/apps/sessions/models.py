@@ -150,3 +150,33 @@ class SessionPlayer(models.Model):
     def __str__(self) -> str:
         """Return a readable representation."""
         return f"{self.user.username} in {self.session.name}"
+
+
+class SessionResultView(models.Model):
+    """Records that a user has already seen a finished session's result.
+
+    Attributes:
+        session: The finished session that was viewed.
+        user: The user who saw the result.
+        viewed_at: Timestamp of the first view.
+    """
+
+    session = models.ForeignKey(
+        GameSession, on_delete=models.CASCADE, related_name="result_views"
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="viewed_results"
+    )
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "sessions_result_view"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("session", "user"), name="uniq_session_result_view"
+            )
+        ]
+
+    def __str__(self) -> str:
+        """Return a readable representation."""
+        return f"{self.user.username} viewed {self.session.name}"

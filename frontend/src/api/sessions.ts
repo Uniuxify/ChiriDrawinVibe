@@ -10,6 +10,11 @@ import type {
   SessionStateDTO,
 } from "./types";
 
+/** Record that the caller has already seen a finished session's result. */
+export async function markSessionViewed(id: number): Promise<void> {
+  await api.post(`/sessions/${id}/viewed`);
+}
+
 /** Fetch the caller's sessions grouped by lifecycle status. */
 export async function fetchMySessions(): Promise<MySessionsResponse> {
   const { data } = await api.get<MySessionsResponse>("/sessions/mine");

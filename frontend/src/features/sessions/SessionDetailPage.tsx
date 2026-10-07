@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,6 +19,7 @@ import {
   deleteSession,
   fetchSessionState,
   finishSession,
+  markSessionViewed,
   removePlayer,
   startSession,
 } from "../../api/sessions";
@@ -105,6 +106,17 @@ export default function SessionDetailPage() {
     onError: (e) => setError(extractApiMessage(e)),
   });
 
+  // The finished-result modal must appear only once per player: record the
+  // view as soon as it is about to be shown, so the next visit skips it.
+  const pendingFinishedModal =
+    stateQuery.data != null &&
+    stateQuery.data.session.status === "finished" &&
+    !stateQuery.data.result_viewed;
+  useEffect(() => {
+    if (!pendingFinishedModal) return;
+    markSessionViewed(sessionId).catch(() => undefined);
+  }, [pendingFinishedModal, sessionId]);
+
   if (stateQuery.isLoading) {
     return <Typography sx={{ p: 3 }}>Loading session…</Typography>;
   }
@@ -150,7 +162,9 @@ export default function SessionDetailPage() {
     iteration,
   } = state;
   const finished = session.status === "finished";
-  const finishedModal = finished && !finishedDismissed && revealed.size === 0;
+  const resultViewed = state.result_viewed ?? false;
+  const finishedModal =
+    finished && !resultViewed && !finishedDismissed && revealed.size === 0;
   const joinedPlayers = session.players ?? [];
   const joinedCount = joinedPlayers.length;
   const isOwner = session.owner === myUserId;

@@ -7,6 +7,7 @@ from django.urls import path
 from apps.sessions.views import (
     FinishSessionView,
     JoinSessionView,
+    MarkResultViewedView,
     MySessionsView,
     PublicFinishedSessionsView,
     SessionCreateView,
@@ -54,5 +55,10 @@ urlpatterns = [
         "sessions/<int:session_id>/state",
         SessionStateView.as_view(),
         name="session-state",
+    ),
+    path(
+        "sessions/<int:session_id>/viewed",
+        MarkResultViewedView.as_view(),
+        name="session-result-viewed",
     ),
 ]

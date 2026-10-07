@@ -103,6 +103,8 @@ export interface SessionStateDTO {
   available_unlocks: number;
   completed_pct: number;
   next_unlock_at: string | null;
+  /** Whether the caller has already seen the finished result modal. */
+  result_viewed?: boolean;
   version?: number;
   status?: SessionStatus;
   progress?: { filled: number; total: number; percent: number };
