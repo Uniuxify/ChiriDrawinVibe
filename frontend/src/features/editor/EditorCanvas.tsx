@@ -93,6 +93,9 @@ export default function EditorCanvas({
   const draftRef = useRef<DraftStroke | null>(null);
   const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
   const [viewport, setViewport] = useState({ width: 800, height: 600 });
+  // User zoom override: null follows the automatic fit; the mouse wheel sets
+  // an absolute scale clamped between the zone-fit and cell-fit bounds.
+  const [zoomScale, setZoomScale] = useState<number | null>(null);
 
   const cellOffsetX = (cellCol - originCol) * cellWidth;
   const cellOffsetY = (cellRow - originRow) * cellHeight;
@@ -140,10 +143,24 @@ export default function EditorCanvas({
   const cellCentreY = cellOffsetY + cellHeight / 2;
   const requiredWidth = 2 * requiredHalfWidth;
   const requiredHeight = 2 * requiredHalfHeight;
-  const scale = Math.min(
-    viewport.width / requiredWidth,
-    viewport.height / requiredHeight,
+
+  const viewW = Math.max(1, viewport.width);
+  const viewH = Math.max(1, viewport.height);
+
+  // Automatic scale: the edited cell plus the minimum context margin.
+  const baseScale = Math.min(viewW / requiredWidth, viewH / requiredHeight);
+  // Maximum zoom-out: the current cell plus its whole context zone fits
+  // into the viewport.
+  const zoneWidth = contextCols * cellWidth;
+  const zoneHeight = contextRows * cellHeight;
+  const minScale = Math.min(
+    viewW / (2 * Math.max(cellCentreX, zoneWidth - cellCentreX)),
+    viewH / (2 * Math.max(cellCentreY, zoneHeight - cellCentreY)),
   );
+  // Maximum zoom-in: the edited cell (the canvas) is never cropped.
+  const maxScale = Math.min(viewW / cellWidth, viewH / cellHeight);
+  const scale = Math.min(Math.max(zoomScale ?? baseScale, minScale), maxScale);
+
   const offsetX = viewport.width / 2 - cellCentreX * scale;
   const offsetY = viewport.height / 2 - cellCentreY * scale;
 
@@ -286,6 +303,19 @@ export default function EditorCanvas({
     ? (contextCells.find((item) => item.cellId === hoveredCellId) ?? null)
     : null;
 
+  /**
+   * Zoom around the centre of the edited cell with the mouse wheel.
+   *
+   * The scale is clamped between the zone-fit (max zoom-out) and the
+   * cell-fit (max zoom-in) bounds.
+   */
+  function handleWheel(event: Konva.KonvaEventObject<WheelEvent>) {
+    event.evt.preventDefault();
+    const factor = event.evt.deltaY > 0 ? 1 / 1.15 : 1.15;
+    const start = zoomScale ?? baseScale;
+    setZoomScale(Math.min(Math.max(start * factor, minScale), maxScale));
+  }
+
   return (
     <Box
       ref={containerRef}
@@ -306,6 +336,8 @@ export default function EditorCanvas({
         onTouchStart={handleMouseDown}
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
+        onWheel={handleWheel}
+        onDblClick={() => setZoomScale(null)}
         style={{ cursor: "crosshair" }}
       >
         <Layer x={offsetX} y={offsetY} scaleX={scale} scaleY={scale}>
