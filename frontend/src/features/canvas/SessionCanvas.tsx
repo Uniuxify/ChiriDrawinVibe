@@ -26,6 +26,9 @@ const STATUS_FILL: Record<string, string> = {
   orphan: "#eeeeee",
 };
 
+/** Translucent dark overlay drawn over the hovered cell. */
+const HOVER_FILL = "rgba(0, 0, 0, 0.35)";
+
 /**
  * Renders the session grid: cell states, drawings, ownership hints and hover
  * borders.
@@ -46,6 +49,7 @@ export default function SessionCanvas({
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
+  const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
 
   const cellW = session.canvas_width / session.grid_cols;
   const cellH = session.canvas_height / session.grid_rows;
@@ -165,6 +169,7 @@ export default function SessionCanvas({
                   stroke="#bdbdbd"
                   strokeWidth={1}
                   onMouseEnter={(e) => {
+                    setHoveredCellId(cell.id);
                     const target = (e as unknown as ShapeEvt).target;
                     if (isMine || finished) {
                       const stage = target.getStage();
@@ -175,6 +180,9 @@ export default function SessionCanvas({
                     }
                   }}
                   onMouseLeave={(e) => {
+                    setHoveredCellId((current) =>
+                      current === cell.id ? null : current,
+                    );
                     const target = (e as unknown as ShapeEvt).target;
                     target.stroke("#bdbdbd");
                     target.strokeWidth(1);
@@ -204,6 +212,33 @@ export default function SessionCanvas({
                     />
                   ))}
                 </Group>
+                {/* Hover feedback: the cell darkens and its comment shows
+                    in the middle of the cell. */}
+                {hoveredCellId === cell.id && (
+                  <Group listening={false}>
+                    <Rect
+                      x={x}
+                      y={y}
+                      width={cellW}
+                      height={cellH}
+                      fill={HOVER_FILL}
+                    />
+                    {cell.comment && (
+                      <Text
+                        x={x + 6}
+                        y={y + 6}
+                        width={cellW - 12}
+                        height={cellH - 12}
+                        text={cell.comment}
+                        align="center"
+                        verticalAlign="middle"
+                        wrap="word"
+                        fontSize={Math.min(14, Math.max(8, cellH / 6))}
+                        fill="#ffffff"
+                      />
+                    )}
+                  </Group>
+                )}
                 {!finished && isMine && cell.status === "empty" && (
                   <Text
                     x={x + 4}

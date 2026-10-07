@@ -57,7 +57,6 @@ export default function CellEditorPage() {
   );
   const [error, setError] = useState<string | null>(null);
   const [commitOpen, setCommitOpen] = useState(false);
-  const [hoveredCellId, setHoveredCellId] = useState<string | null>(null);
 
   const revisionRef = useRef(0);
   const hydratedRef = useRef(false);
@@ -216,14 +215,6 @@ export default function CellEditorPage() {
       halfHeight: raw.half_height,
     };
   }, [contextQuery.data?.shape]);
-
-  const hoveredComment = useMemo(() => {
-    if (!hoveredCellId) return null;
-    return (
-      neighbors.find((neighbor) => neighbor.cell_id === hoveredCellId)
-        ?.comment ?? null
-    );
-  }, [hoveredCellId, neighbors]);
 
   const save = useCallback(async () => {
     if (!cellId || history.length === 0) return;
@@ -414,7 +405,6 @@ export default function CellEditorPage() {
             setRedoStack([]);
             setSaveState("idle");
           }}
-          onHoverContext={setHoveredCellId}
         />
         <Box
           sx={{
@@ -437,20 +427,6 @@ export default function CellEditorPage() {
               flexDirection: "column",
             }}
           >
-            <TextField
-              label="Comment (optional)"
-              multiline
-              minRows={3}
-              fullWidth
-              value={comment}
-              onChange={(event) => setComment(event.target.value)}
-              helperText="Shown to players who unlock a neighbouring cell."
-            />
-            {hoveredComment && (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                Neighbour comment: {hoveredComment}
-              </Alert>
-            )}
             <Box sx={{ flex: 1 }} />
             <Typography variant="caption" color="text.secondary">
               The dashed area is the read-only context zone. Only the bordered
@@ -467,6 +443,16 @@ export default function CellEditorPage() {
             This action is irreversible. The cell becomes read-only after the
             confirmation.
           </DialogContentText>
+          <TextField
+            label="Comment (optional)"
+            multiline
+            minRows={3}
+            fullWidth
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            helperText="Shown to players who unlock a neighbouring cell."
+            sx={{ mt: 2 }}
+          />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCommitOpen(false)}>Back</Button>

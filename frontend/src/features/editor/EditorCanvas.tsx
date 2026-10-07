@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Box } from "@mui/material";
+import { Box, Typography } from "@mui/material";
 import { Group, Layer, Line, Rect, Stage } from "react-konva";
 import type Konva from "konva";
 import type { DrawOperation } from "../../api/types";
@@ -36,7 +36,6 @@ interface Props {
   /** Minimum visible share (%) of each neighbour cell while drawing. */
   minContextVisiblePct: number;
   onStrokeComplete: (operation: DrawOperation) => void;
-  onHoverContext: (cellId: string | null) => void;
 }
 
 interface DraftStroke {
@@ -87,7 +86,6 @@ export default function EditorCanvas({
   showContextArea,
   minContextVisiblePct,
   onStrokeComplete,
-  onHoverContext,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -282,10 +280,17 @@ export default function EditorCanvas({
     };
   }, [drawing, appendPoint, pointFromClient, handleMouseUp]);
 
+  // Cell under the cursor; drives the comment window at the top of the
+  // screen.
+  const hoveredCell = hoveredCellId
+    ? (contextCells.find((item) => item.cellId === hoveredCellId) ?? null)
+    : null;
+
   return (
     <Box
       ref={containerRef}
       sx={{
+        position: "relative",
         flex: 1,
         minWidth: 0,
         minHeight: 0,
@@ -315,11 +320,7 @@ export default function EditorCanvas({
             cellCol={cellCol}
             shape={contextShape}
             cells={contextCells}
-            hoveredCellId={hoveredCellId}
-            onHover={(cellId) => {
-              setHoveredCellId(cellId);
-              onHoverContext(cellId);
-            }}
+            onHover={setHoveredCellId}
           />
           <Rect
             x={cellOffsetX}
@@ -385,6 +386,50 @@ export default function EditorCanvas({
           />
         </Layer>
       </Stage>
+
+      {/* Comment window, pinned to the top centre of the screen and drawn
+          above the canvas; it follows the hovered context cell. */}
+      {hoveredCell && (
+        <Box
+          sx={{
+            position: "absolute",
+            top: 16,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 1,
+            width: "min(95%, 640px)",
+            px: 3,
+            py: 1.5,
+            bgcolor: "rgba(0, 0, 0, 0.85)",
+            borderRadius: "16px",
+            pointerEvents: "none",
+            "@keyframes commentWindowFadeIn": {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
+            animation: "commentWindowFadeIn 0.25s ease-out",
+          }}
+        >
+          <Typography
+            variant="subtitle2"
+            sx={{ fontWeight: 700, color: "#ffffff", textAlign: "center" }}
+          >
+            Cell comment
+          </Typography>
+          <Typography
+            variant="body2"
+            sx={{
+              color: "#ffffff",
+              mt: 0.5,
+              textAlign: "center",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {hoveredCell.comment || "No comment"}
+          </Typography>
+        </Box>
+      )}
     </Box>
   );
 }

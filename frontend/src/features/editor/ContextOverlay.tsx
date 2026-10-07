@@ -1,4 +1,4 @@
-import { Ellipse, Group, Line, Rect, Text } from "react-konva";
+import { Ellipse, Group, Line, Rect } from "react-konva";
 import type Konva from "konva";
 import type { RenderedStroke } from "../../shared/renderHistory";
 
@@ -36,12 +36,9 @@ interface Props {
   /** Figure the context is cropped to; defaults to a full-cell square. */
   shape: ContextShapeView | null;
   cells: ContextCellView[];
-  /** Id of the neighbour currently hovered, if any. */
-  hoveredCellId: string | null;
   onHover: (cellId: string | null) => void;
 }
 
-const CONTEXT_COLOR = "#42a5f5";
 const EMPTY_FILL = "#e9ecef";
 const FILLED_FILL = "#ffffff";
 const ZONE_FILL = "#f0f2f4";
@@ -67,7 +64,6 @@ export default function ContextOverlay({
   cellCol,
   shape,
   cells,
-  hoveredCellId,
   onHover,
 }: Props) {
   const kind = shape?.kind ?? "rectangle";
@@ -169,54 +165,6 @@ export default function ContextOverlay({
           );
         })}
       </Group>
-
-      {/* Hover highlight, drawn on top of the figure so it is never clipped. */}
-      {cells.map((cell) => {
-        const hovered = hoveredCellId === cell.cellId;
-        if (!hovered) return null;
-        return (
-          <Rect
-            key={`hover-${cell.cellId}`}
-            x={cellX(cell.col)}
-            y={cellY(cell.row)}
-            width={cellWidth}
-            height={cellHeight}
-            stroke={CONTEXT_COLOR}
-            strokeWidth={2}
-            cornerRadius={2}
-            listening={false}
-          />
-        );
-      })}
-
-      {/* Comment markers, always visible for cells that have a comment. */}
-      {cells.map((cell) => {
-        if (!cell.comment) return null;
-        const x = cellX(cell.col) + cellWidth - 26;
-        const y = cellY(cell.row) + 4;
-        return (
-          <Group key={`comment-${cell.cellId}`} listening={false}>
-            <Rect
-              x={x}
-              y={y}
-              width={22}
-              height={18}
-              fill={CONTEXT_COLOR}
-              cornerRadius={4}
-              opacity={0.9}
-            />
-            <Text
-              x={x}
-              y={y + 1}
-              width={22}
-              text="✎"
-              align="center"
-              fontSize={12}
-              fill="#ffffff"
-            />
-          </Group>
-        );
-      })}
 
       {/* Transparent hover targets: one per neighbour. */}
       {cells.map((cell) => (
