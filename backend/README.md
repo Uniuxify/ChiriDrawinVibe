@@ -1,12 +1,14 @@
 # ChiriDrawin
 
+**This app is vibe-coded**
+
+
 Collaborative drawing web app. The shared canvas is split into cells distributed
 between players. Players sequentially unlock and fill their own cells while seeing
 a limited read-only context of neighbouring cells. The final picture is assembled
 from all cells.
 
-This repository currently contains the **backend** (Django + DRF). See
-`.clinerules/general_plan.md` for the full product plan and architecture.
+This repository currently contains the **backend** (Django + DRF).
 
 ## Backend stack
 
@@ -101,9 +103,3 @@ backend/
   pytest.ini
   .ruff.toml
 ```
-
-## Notes on conventions
-
-- Google-style docstrings, `snake_case`, type annotations on public functions.
-- Ruff for lint and format (`line-length = 88`).
-- Migrations are excluded from import-order/line-length lint rules.
