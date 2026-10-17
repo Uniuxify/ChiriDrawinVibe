@@ -8,6 +8,7 @@ import SessionDetailPage from "./features/sessions/SessionDetailPage";
 import AccountsPage from "./features/accounts/AccountsPage";
 import CellEditorPage from "./features/editor/CellEditorPage";
 import PublicListPage from "./features/viewer/PublicListPage";
+import PublicSessionPage from "./features/viewer/PublicSessionPage";
 import DebugPanel from "./features/debug/DebugPanel";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -22,6 +23,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/public" element={<PublicListPage />} />
+      <Route path="/public/:id" element={<PublicSessionPage />} />
       <Route
         path="/"
         element={

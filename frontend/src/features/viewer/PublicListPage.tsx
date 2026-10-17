@@ -70,7 +70,7 @@ export default function PublicListPage() {
               <Button
                 size="small"
                 component={RouterLink}
-                to={`/sessions/${s.id}`}
+                to={`/public/${s.id}`}
               >
                 View
               </Button>

@@ -33,7 +33,7 @@ src/
     sessions/     # list, create, join dialog, detail (polling + admin panel)
     canvas/       # SessionCanvas grid with cell states
     editor/       # CellEditor: tools, undo/redo, autosave, commit
-    viewer/       # public finished-session gallery
+    viewer/       # public gallery, anonymous viewer page, timelapse player
   App.tsx         # routes + auth guard
   main.tsx        # providers (Query, Theme, Router)
 ```
@@ -50,6 +50,14 @@ src/
 - **Editor**: brush/eraser, palette, size, undo/redo (Ctrl+Z / Ctrl+Y, client
   only), periodic autosave, and an irreversible commit dialog with an optional
   comment.
+- **Anonymous viewer**: the public gallery links to `/public/:id`, where a
+  finished public session is revealed cell by cell (plus an Open All
+  cascade) and can be replayed in the timelapse player.
+- **Timelapse**: the finished-session screen and the public viewer open a
+  replay dialog (play/pause, scrubbing, speed) built from the committed
+  histories of every cell.
+- **Admin cell overrides**: in admin mode, clicking a cell opens skip /
+  fill-in-blank / release-lock actions.
 
 ## Debug tools
 

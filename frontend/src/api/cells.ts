@@ -139,6 +139,16 @@ export async function adminUnlockCell(cellId: string): Promise<void> {
   await api.post(`/cells/${cellId}/admin/unlock`);
 }
 
+/** Administrator override that hands a stalled cell to another player. */
+export async function adminSkipCell(cellId: string): Promise<void> {
+  await api.post(`/cells/${cellId}/admin/skip`);
+}
+
+/** Administrator override that fills a cell blank for a stuck player. */
+export async function adminForceFillCell(cellId: string): Promise<void> {
+  await api.post(`/cells/${cellId}/admin/force_fill`);
+}
+
 /** History payload returned for read-only cell rendering. */
 export interface CellHistoryPayload {
   operations: DrawOperation[];

@@ -50,6 +50,13 @@ def on_cell_committed(cell: Cell) -> None:
             _maybe_start_timer(iteration, session)
         _maybe_advance_iteration(iteration, session)
 
+    # Once every originally-assigned cell is filled, the orphan pool of a
+    # departed player is dealt out to the remaining players; the session can
+    # then finish once those cells are filled too.
+    from apps.sessions.services import redistribute_orphan_cells
+
+    redistribute_orphan_cells(session)
+
     _maybe_finish_session(session)
 
 

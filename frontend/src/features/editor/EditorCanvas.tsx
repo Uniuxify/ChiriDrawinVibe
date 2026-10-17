@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Box, Typography } from "@mui/material";
+import { Box, Slider, Typography } from "@mui/material";
 import { Group, Layer, Line, Rect, Stage } from "react-konva";
 import type Konva from "konva";
 import type { DrawOperation } from "../../api/types";
@@ -47,6 +47,28 @@ interface DraftStroke {
 const COORD_MIN = -1;
 /** Highest normalized coordinate accepted by the API: one cell beyond the edge. */
 const COORD_MAX = 2;
+/** Gap (px) between the slider panel and the viewport bottom. */
+const SLIDER_GAP = 12;
+/** Height (px) of the bottom screen strip that reveals the slider on hover. */
+const SLIDER_HOVER_ZONE = 96;
+/**
+ * Gap (px) between the slider panel and the cell above it.
+ *
+ * Deliberately equal to SLIDER_GAP so the panel is centred in the space
+ * between the cell and the bottom edge of the screen.
+ */
+const SLIDER_CELL_GAP = 12;
+/** Fixed outer height (px) of the slider panel; keeps the layout math exact. */
+const SLIDER_PANEL_HEIGHT = 40;
+/**
+ * Distance (px) from the viewport bottom to the lowest allowed point of the
+ * cell: bottom gap + panel height + gap to the cell.
+ *
+ * The cell is centred, so both of its vertical margins shrink equally; the
+ * cell-fit zoom bound reserves twice this extent to keep the cell exactly
+ * SLIDER_CELL_GAP above the panel at maximum zoom, never overlapping it.
+ */
+const SLIDER_BOTTOM_EXTENT = SLIDER_GAP + SLIDER_PANEL_HEIGHT + SLIDER_CELL_GAP;
 
 /**
  * Clamp a normalized coordinate into the range required by the API.
@@ -96,6 +118,12 @@ export default function EditorCanvas({
   // User zoom override: null follows the automatic fit; the mouse wheel sets
   // an absolute scale clamped between the zone-fit and cell-fit bounds.
   const [zoomScale, setZoomScale] = useState<number | null>(null);
+  // The slider is revealed while the pointer sits in the bottom strip of the
+  // screen, or for a second after a wheel zoom.
+  const [pointerNearSlider, setPointerNearSlider] = useState(false);
+  const [wheelActive, setWheelActive] = useState(false);
+  const isWheelActiveRef = useRef(false);
+  const zoomSliderOpen = pointerNearSlider || wheelActive;
 
   const cellOffsetX = (cellCol - originCol) * cellWidth;
   const cellOffsetY = (cellRow - originRow) * cellHeight;
@@ -157,9 +185,18 @@ export default function EditorCanvas({
     viewW / (2 * Math.max(cellCentreX, zoneWidth - cellCentreX)),
     viewH / (2 * Math.max(cellCentreY, zoneHeight - cellCentreY)),
   );
-  // Maximum zoom-in: the edited cell (the canvas) is never cropped.
-  const maxScale = Math.min(viewW / cellWidth, viewH / cellHeight);
-  const scale = Math.min(Math.max(zoomScale ?? baseScale, minScale), maxScale);
+  // Maximum zoom-in: the edited cell (the canvas) is never cropped. The
+  // vertical bound reserves the bottom strip for the always-visible zoom
+  // slider, so the cell ends exactly SLIDER_CELL_GAP above the panel at
+  // maximum zoom and never overlaps it.
+  const maxScale = Math.min(
+    viewW / cellWidth,
+    Math.max(1, viewH - 2 * SLIDER_BOTTOM_EXTENT) / cellHeight,
+  );
+  // Keep the zoom range sane on tiny viewports where the reserve may make
+  // the cell-fit bound smaller than the zone-fit bound.
+  const lowerScale = Math.min(minScale, maxScale);
+  const scale = Math.min(Math.max(zoomScale ?? baseScale, lowerScale), maxScale);
 
   const offsetX = viewport.width / 2 - cellCentreX * scale;
   const offsetY = viewport.height / 2 - cellCentreY * scale;
@@ -313,8 +350,40 @@ export default function EditorCanvas({
     event.evt.preventDefault();
     const factor = event.evt.deltaY > 0 ? 1 / 1.15 : 1.15;
     const start = zoomScale ?? baseScale;
-    setZoomScale(Math.min(Math.max(start * factor, minScale), maxScale));
+    setZoomScale(Math.min(Math.max(start * factor, lowerScale), maxScale));
+    isWheelActiveRef.current = true;
+    setWheelActive(true);
   }
+
+  // Reveal the slider whenever the pointer enters the bottom strip of the
+  // screen; leaving the strip hides it immediately (unless wheel-zooming).
+  useEffect(() => {
+    const handleMove = (event: MouseEvent) => {
+      const element = containerRef.current;
+      if (!element) return;
+      const rect = element.getBoundingClientRect();
+      const near = event.clientY >= rect.bottom - SLIDER_HOVER_ZONE;
+      setPointerNearSlider((previous) => (previous === near ? previous : near));
+    };
+    window.addEventListener("mousemove", handleMove);
+    return () => window.removeEventListener("mousemove", handleMove);
+  }, []);
+
+  // Wheel-driven visibility expires one second after the last wheel event.
+  // A single repeating timer (instead of a timeout per wheel event) keeps
+  // fast successive wheel bursts from spawning and cancelling timers; it is
+  // cleared on unmount through this effect's cleanup.
+  useEffect(() => {
+    if (!wheelActive) return;
+    const timer = window.setInterval(() => {
+      if (isWheelActiveRef.current) {
+        isWheelActiveRef.current = false;
+        return;
+      }
+      setWheelActive(false);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [wheelActive]);
 
   return (
     <Box
@@ -337,7 +406,6 @@ export default function EditorCanvas({
         onTouchMove={handleMouseMove}
         onTouchEnd={handleMouseUp}
         onWheel={handleWheel}
-        onDblClick={() => setZoomScale(null)}
         style={{ cursor: "crosshair" }}
       >
         <Layer x={offsetX} y={offsetY} scaleX={scale} scaleY={scale}>
@@ -464,6 +532,75 @@ export default function EditorCanvas({
           )}
         </Box>
       )}
+
+      {/* Zoom slider pinned to the bottom centre, inside the reserved
+          bottom strip: the zoom bounds keep the cell above it, so it never
+          overlaps the canvas. It fades in while the pointer is in the
+          bottom strip of the screen or right after a wheel zoom, and fades
+          out otherwise. The panel never intercepts pointer events; only
+          the slider thumb does. */}
+      <Box
+        position="absolute"
+        bottom={0}
+        left={0}
+        right={0}
+        zIndex={999}
+        sx={{
+          opacity: zoomSliderOpen ? 1 : 0,
+          transition: "opacity 0.25s",
+          pointerEvents: "none",
+        }}
+      >
+        <Box
+          sx={{
+            position: "absolute",
+            bottom: SLIDER_GAP,
+            left: "50%",
+            transform: "translateX(-50%)",
+            height: SLIDER_PANEL_HEIGHT,
+            boxSizing: "border-box",
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            px: 1.5,
+            borderRadius: 2,
+            bgcolor: "rgba(0, 0, 0, 0.75)",
+            boxShadow: "0 6px 16px rgba(0, 0, 0, 0.45)",
+          }}
+        >
+          <Slider
+            size="small"
+            value={scale}
+            min={lowerScale}
+            max={maxScale}
+            step={(maxScale - lowerScale) / 200}
+            onChange={(_, value) => {
+              if (typeof value !== "number") return;
+              setZoomScale(
+                Math.min(Math.max(value, lowerScale), maxScale),
+              );
+            }}
+            sx={{
+              width: 220,
+              color: "#ffffff",
+              pointerEvents: "auto",
+              "& .MuiSlider-thumb": {
+                width: 12,
+                height: 12,
+                bgcolor: "#ffffff",
+                "&:hover, &:focus-visible": {
+                  boxShadow: "0 0 0 8px rgba(255, 255, 255, 0.16)",
+                },
+              },
+              "& .MuiSlider-track": { border: "none" },
+              "& .MuiSlider-rail": {
+                bgcolor: "rgba(255, 255, 255, 0.38)",
+                opacity: 1,
+              },
+            }}
+          />
+        </Box>
+      </Box>
     </Box>
   );
 }

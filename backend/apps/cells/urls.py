@@ -5,6 +5,8 @@ from __future__ import annotations
 from django.urls import path
 
 from apps.cells.views import (
+    CellAdminForceFillView,
+    CellAdminSkipView,
     CellAdminUnlockView,
     CellAutosaveView,
     CellCommitView,
@@ -37,5 +39,15 @@ urlpatterns = [
         "cells/<uuid:cell_id>/admin/unlock",
         CellAdminUnlockView.as_view(),
         name="cell-admin-unlock",
+    ),
+    path(
+        "cells/<uuid:cell_id>/admin/skip",
+        CellAdminSkipView.as_view(),
+        name="cell-admin-skip",
+    ),
+    path(
+        "cells/<uuid:cell_id>/admin/force_fill",
+        CellAdminForceFillView.as_view(),
+        name="cell-admin-force-fill",
     ),
 ]

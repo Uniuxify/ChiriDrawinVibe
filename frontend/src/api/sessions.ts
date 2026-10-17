@@ -2,6 +2,7 @@
 
 import { api } from "./client";
 import type {
+  DrawOperation,
   IterationDTO,
   MySessionsResponse,
   PublicConfig,
@@ -9,6 +10,35 @@ import type {
   SessionDTO,
   SessionStateDTO,
 } from "./types";
+
+/** One cell's committed history inside the timelapse payload. */
+export interface TimelapseEvent {
+  cell_id: string;
+  row: number;
+  col: number;
+  /** Timestamp of the first operation, when the history carries one. */
+  first_ts: number | null;
+  operations: DrawOperation[];
+}
+
+/** Geometry plus per-cell histories of a finished session, for replay. */
+export interface TimelapseData {
+  session_id: number;
+  name: string;
+  canvas_width: number;
+  canvas_height: number;
+  grid_cols: number;
+  grid_rows: number;
+  cell_width: number;
+  cell_height: number;
+  events: TimelapseEvent[];
+}
+
+/** Fetch the replay data of a finished session's timelapse. */
+export async function fetchSessionTimelapse(id: number): Promise<TimelapseData> {
+  const { data } = await api.get<TimelapseData>(`/sessions/${id}/timelapse`);
+  return data;
+}
 
 /** Record that the caller has already seen a finished session's result. */
 export async function markSessionViewed(id: number): Promise<void> {

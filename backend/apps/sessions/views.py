@@ -54,8 +54,13 @@ def _get_session(session_id: int, user) -> GameSession:
     except GameSession.DoesNotExist as exc:
         raise NotFoundError("Session not found.") from exc
 
-    is_owner = session.owner_id == user.id
-    is_player = session.players.filter(user=user).exists()
+    # Anonymous viewers (``user`` is ``None``) may only reach public finished
+    # sessions; authenticated users additionally see what they own or play.
+    authenticated = bool(user is not None and user.is_authenticated)
+    is_owner = authenticated and session.owner_id == user.id
+    is_player = (
+        authenticated and session.players.filter(user=user).exists()
+    )
     is_public_finished = session.is_public and session.status == SessionStatus.FINISHED
     if not (is_owner or is_player or is_public_finished):
         raise NotFoundError("Session not found.")
@@ -419,7 +424,13 @@ class SetPictureRevealedView(APIView):
 
 
 class SessionStateView(APIView):
-    """Expose a polling-friendly snapshot of the session state."""
+    """Expose a polling-friendly snapshot of the session state.
+
+    Open to anonymous viewers as well: they only get public finished
+    sessions (see ``_get_session``) and no player-specific data.
+    """
+
+    permission_classes = ()
 
     def get(self, request: Request, session_id: int) -> Response:
         """Return the session, cells, iteration and unlock information.
@@ -432,7 +443,8 @@ class SessionStateView(APIView):
             A response with the serialized session, per-cell visibility, the
             current iteration, unlock availability and progress percentage.
         """
-        session = _get_session(session_id, request.user)
+        user = request.user if request.user.is_authenticated else None
+        session = _get_session(session_id, user)
         cells = list(session.cells.all())
         total = len(cells)
         filled = sum(1 for cell in cells if cell.status == CellStatus.FILLED)
@@ -448,16 +460,18 @@ class SessionStateView(APIView):
                 "locked_by_user_id": cell.locked_by_id,
                 "comment": cell.comment or None,
                 "revision": cell.revision,
-                "is_mine": cell.owner_id == request.user.id,
+                "is_mine": user is not None and cell.owner_id == user.id,
                 "has_comment": bool(cell.comment),
             }
             for cell in cells
         ]
 
         iteration_payload, available_unlocks, can_unlock, next_unlock_at = (
-            _unlock_state(session, request.user)
+            _unlock_state(session, user)
         )
-        result_view = session.result_views.filter(user=request.user).first()
+        result_view = (
+            session.result_views.filter(user=user).first() if user else None
+        )
 
         return Response(
             {
@@ -493,6 +507,10 @@ def _unlock_state(session, user) -> tuple[dict | None, int, bool, str | None]:
         remaining unlocks, whether the caller may unlock right now and the
         ISO timestamp when the iteration timer ends.
     """
+    if user is None:
+        # Anonymous viewers have no quota and cannot unlock anything.
+        return None, 0, False, None
+
     iteration = (
         session.iterations.filter(state=IterationState.ACTIVE).first()
         or session.iterations.order_by("-index").first()

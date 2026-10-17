@@ -186,3 +186,52 @@ def maybe_finish_session(session: GameSession) -> bool:
         return False
     finish_session(session)
     return True
+
+
+@transaction.atomic
+def redistribute_orphan_cells(session: GameSession) -> int:
+    """Deal the orphan pool out to the remaining active players.
+
+    Orphan cells appear when a player leaves an active session; per the
+    specification they are not reassigned right away. Once every cell that
+    was originally assigned to a player is filled, the pool is shared out
+    evenly (random order, balanced by current load) so the remaining
+    players finish the picture.
+
+    Args:
+        session: The session to redistribute in.
+
+    Returns:
+        The number of cells that received a new owner.
+    """
+    unfinished_native = session.cells.filter(is_orphan=False).exclude(
+        status=CellStatus.FILLED
+    )
+    if unfinished_native.exists():
+        return 0
+
+    orphans = list(
+        session.cells.filter(
+            is_orphan=True, status=CellStatus.ORPHAN
+        ).order_by("row", "col")
+    )
+    if not orphans:
+        return 0
+
+    players = list(session.players.filter(is_active=True))
+    if not players:
+        return 0
+
+    counts = {player.user_id: 0 for player in players}
+    random.shuffle(orphans)
+    for cell in orphans:
+        target = min(players, key=lambda p: counts[p.user_id])
+        counts[target.user_id] += 1
+        cell.owner = target.user
+        cell.is_orphan = False
+        cell.status = CellStatus.EMPTY
+        cell.save(update_fields=["owner", "is_orphan", "status"])
+
+    session.touch()
+    session.save(update_fields=["version"])
+    return len(orphans)

@@ -1,7 +1,7 @@
 """Pure geometry helpers computing the read-only context around a cell.
 
 The context is a figure centred on the unlocked cell. Geometry is measured in
-pixels, using the real cell size ``w × h`` (canvas size divided by the grid):
+pixels, using the real cell size ``w x h`` (canvas size divided by the grid):
 
 * the reference radius is ``R = min(w, h) * (0.5 + pct / 100)``, so it grows
   from ``min(w, h) / 2`` at ``0%`` to ``1.5 * min(w, h)`` at ``100%``;
@@ -82,8 +82,8 @@ class NeighborResolver:
             itself.
         """
         kind, half_w, half_h = self.figure_geometry()
-        reach_row = int(math.ceil(half_h / self.cell_height)) + 1
-        reach_col = int(math.ceil(half_w / self.cell_width)) + 1
+        reach_row = math.ceil(half_h / self.cell_height) + 1
+        reach_col = math.ceil(half_w / self.cell_width) + 1
         found: set[tuple[int, int]] = set()
 
         for dr in range(-reach_row, reach_row + 1):

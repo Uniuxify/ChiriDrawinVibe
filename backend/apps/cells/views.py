@@ -15,6 +15,8 @@ from apps.cells.serializers import (
     RasterSerializer,
 )
 from apps.cells.services import (
+    admin_force_fill_cell,
+    admin_skip_cell,
     autosave_cell,
     commit_cell,
     lock_cell,
@@ -265,6 +267,72 @@ class CellAdminUnlockView(APIView):
         cell.locked_by = None
         cell.save(update_fields=["status", "locked_by"])
         return Response(CellSerializer(cell).data)
+
+
+class CellAdminSkipView(APIView):
+    """Administrator override that hands a stalled cell to another player."""
+
+    permission_classes = (IsAdmin,)
+
+    def post(self, request: Request, cell_id) -> Response:
+        """Reassign the cell to the least-loaded active player.
+
+        Args:
+            request: The current request.
+            cell_id: Cell UUID.
+
+        Returns:
+            The reassigned cell.
+        """
+        _require_session_owner(cell_id, request.user)
+        cell = admin_skip_cell(cell_id)
+        return Response(CellSerializer(cell).data)
+
+
+class CellAdminForceFillView(APIView):
+    """Administrator override that fills a cell blank for a stuck player."""
+
+    permission_classes = (IsAdmin,)
+
+    def post(self, request: Request, cell_id) -> Response:
+        """Mark the cell as filled without any drawing.
+
+        Args:
+            request: The current request.
+            cell_id: Cell UUID.
+
+        Returns:
+            The filled cell.
+        """
+        _require_session_owner(cell_id, request.user)
+        cell = admin_force_fill_cell(cell_id)
+
+        from apps.iterations.services import on_cell_committed
+
+        on_cell_committed(cell)
+        return Response(CellSerializer(cell).data)
+
+
+def _require_session_owner(cell_id, user) -> Cell:
+    """Load a cell and ensure the user owns its session.
+
+    Args:
+        cell_id: Cell UUID.
+        user: The requesting user.
+
+    Returns:
+        The loaded cell.
+
+    Raises:
+        NotFoundError: If the cell does not exist.
+        PermissionDeniedError: If the user does not own the session.
+    """
+    cell = Cell.objects.filter(id=cell_id).select_related("session").first()
+    if cell is None:
+        raise NotFoundError("Cell not found.")
+    if cell.session.owner_id != user.id:
+        raise PermissionDeniedError("Only the session owner may do this.")
+    return cell
 
 
 def _context_payload(snapshot: CellContextSnapshot) -> dict:

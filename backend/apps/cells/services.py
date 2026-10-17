@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import uuid
 
 from django.db import transaction
@@ -358,4 +359,132 @@ def commit_cell(
 
     progress.filled_count += 1
     progress.save(update_fields=["filled_count"])
+    return cell
+
+
+@transaction.atomic
+def admin_skip_cell(cell_id: uuid.UUID) -> Cell:
+    """Hand a stalled cell over to the least-loaded active player.
+
+    Used by the administrator when a player stops drawing: the cell is
+    returned to the pool and reassigned to a random player among those
+    holding the fewest own cells, so the workload stays balanced.
+
+    Args:
+        cell_id: Identifier of the cell to skip.
+
+    Returns:
+        The reassigned cell, back in the empty state.
+
+    Raises:
+        NotFoundError: If the cell does not exist.
+        ConflictError: If the session is not active, the cell is filled or
+            orphaned, or there is no other player to take it.
+    """
+    cell = (
+        Cell.objects.select_for_update()
+        .select_related("session")
+        .filter(id=cell_id)
+        .first()
+    )
+    if cell is None:
+        raise NotFoundError("Cell not found.")
+
+    session = cell.session
+    if session.status != SessionStatus.ACTIVE:
+        raise ConflictError("The session is not active.")
+    if cell.status == CellStatus.FILLED:
+        raise ConflictError("Filled cells cannot be skipped.")
+    if cell.is_orphan:
+        raise ConflictError(
+            "Orphan cells are redistributed automatically, not skipped."
+        )
+
+    candidates = [
+        player
+        for player in session.players.filter(is_active=True)
+        if player.user_id != cell.owner_id
+    ]
+    if not candidates:
+        raise ConflictError("There is no other player to take this cell.")
+
+    counts = {
+        player.user_id: session.cells.filter(owner_id=player.user_id).count()
+        for player in candidates
+    }
+    least_loaded = min(counts.values())
+    best = [
+        player
+        for player in candidates
+        if counts[player.user_id] == least_loaded
+    ]
+    target = random.choice(best)
+
+    CellContextSnapshot.objects.filter(cell=cell).delete()
+    cell.owner = target.user
+    cell.status = CellStatus.EMPTY
+    cell.locked_by = None
+    cell.unlocked_at = None
+    cell.save(update_fields=["owner", "status", "locked_by", "unlocked_at"])
+
+    session.touch()
+    session.save(update_fields=["version"])
+    return cell
+
+
+@transaction.atomic
+def admin_force_fill_cell(cell_id: uuid.UUID) -> Cell:
+    """Count a cell as filled without any drawing (blank commit).
+
+    Used by the administrator to "fill in for" a stuck player: the cell
+    becomes filled and white, consumes the owner's quota for the current
+    iteration and triggers the usual cell rendering.
+
+    Args:
+        cell_id: Identifier of the cell to fill.
+
+    Returns:
+        The filled cell.
+
+    Raises:
+        NotFoundError: If the cell does not exist.
+        ConflictError: If the session is not active or the cell is filled.
+    """
+    cell = (
+        Cell.objects.select_for_update()
+        .select_related("session")
+        .filter(id=cell_id)
+        .first()
+    )
+    if cell is None:
+        raise NotFoundError("Cell not found.")
+
+    session = cell.session
+    if session.status != SessionStatus.ACTIVE:
+        raise ConflictError("The session is not active.")
+    if cell.status == CellStatus.FILLED:
+        raise ConflictError("The cell is already filled.")
+
+    # An explicit empty final revision keeps the history unambiguous for
+    # viewers and the timelapse player.
+    _store_history(cell, [], is_final=True)
+
+    try:
+        iteration = active_iteration(session)
+        progress = progress_for(iteration, cell.owner)
+        progress.filled_count += 1
+        progress.save(update_fields=["filled_count"])
+    except ConflictError:
+        # No active iteration (e.g. interval-less sessions between rounds).
+        pass
+
+    cell.status = CellStatus.FILLED
+    cell.locked_by = None
+    cell.filled_at = timezone.now()
+    cell.save(
+        update_fields=["revision", "first_drawn_at", "status", "locked_by", "filled_at"]
+    )
+
+    session.touch()
+    session.save(update_fields=["version"])
     return cell

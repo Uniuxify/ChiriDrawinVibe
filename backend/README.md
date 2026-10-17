@@ -80,6 +80,11 @@ Tests live in `backend/tests/`:
 - `test_sessions.py` — session start, cell distribution, lifecycle guards.
 - `test_commit.py` — commit resilience when rendering fails, cell revision
   exposure in unlock/state payloads.
+- `test_public_viewing.py` — anonymous viewing of public finished sessions
+  (`state`, `result`, `timelapse`).
+- `test_admin_actions.py` — administrator cell overrides (skip, force fill).
+- `test_orphan_redistribution.py` — dealing the orphan pool out once all
+  originally-assigned cells are filled.
 
 Run with `pytest`. The suite uses an isolated test database via `pytest-django`.
 

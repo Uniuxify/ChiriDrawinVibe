@@ -22,18 +22,25 @@ import {
 import {
   deleteSession,
   fetchSessionState,
+  fetchSessionTimelapse,
   finishSession,
   markSessionViewed,
   removePlayer,
   setSessionRevealed,
   startSession,
 } from "../../api/sessions";
-import { unlockCell } from "../../api/cells";
+import {
+  adminForceFillCell,
+  adminSkipCell,
+  adminUnlockCell,
+  unlockCell,
+} from "../../api/cells";
 import type { CellDTO } from "../../api/types";
 import { extractApiMessage } from "../../shared/apiError";
 import { debug } from "../../shared/debug";
 import { useAuthStore } from "../../store/auth";
 import SessionCanvas from "../canvas/SessionCanvas";
+import TimelapsePlayer from "../viewer/TimelapsePlayer";
 
 const log = debug("session");
 
@@ -103,6 +110,8 @@ export default function SessionDetailPage() {
   const isAdmin = useAuthStore((s) => s.isAdmin);
 
   const [adminMode, setAdminMode] = useState(false);
+  const [adminCellOpen, setAdminCellOpen] = useState(false);
+  const [timelapseOpen, setTimelapseOpen] = useState(false);
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [pendingCell, setPendingCell] = useState<CellDTO | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -123,6 +132,13 @@ export default function SessionDetailPage() {
     queryFn: () => fetchSessionState(sessionId),
     refetchInterval: 5000,
     enabled: sessionId > 0,
+  });
+
+  const timelapseQuery = useQuery({
+    queryKey: ["session-timelapse", sessionId],
+    queryFn: () => fetchSessionTimelapse(sessionId),
+    enabled: timelapseOpen,
+    staleTime: Infinity,
   });
 
   const startMut = useMutation({
@@ -171,6 +187,42 @@ export default function SessionDetailPage() {
     mutationFn: (userId: number) => removePlayer(sessionId, userId),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] }),
+    onError: (e) => setError(extractApiMessage(e)),
+  });
+
+  // Administrator cell overrides: skip (reassign to another player), fill in
+  // blank, and release a stuck lock.
+  const closeAdminCell = () => {
+    setAdminCellOpen(false);
+    setPendingCell(null);
+  };
+  const invalidateState = () =>
+    queryClient.invalidateQueries({ queryKey: ["session-state", sessionId] });
+
+  const adminSkipMut = useMutation({
+    mutationFn: (cellId: string) => adminSkipCell(cellId),
+    onSuccess: () => {
+      closeAdminCell();
+      void invalidateState();
+    },
+    onError: (e) => setError(extractApiMessage(e)),
+  });
+
+  const adminFillMut = useMutation({
+    mutationFn: (cellId: string) => adminForceFillCell(cellId),
+    onSuccess: () => {
+      closeAdminCell();
+      void invalidateState();
+    },
+    onError: (e) => setError(extractApiMessage(e)),
+  });
+
+  const adminReleaseMut = useMutation({
+    mutationFn: (cellId: string) => adminUnlockCell(cellId),
+    onSuccess: () => {
+      closeAdminCell();
+      void invalidateState();
+    },
     onError: (e) => setError(extractApiMessage(e)),
   });
 
@@ -479,6 +531,15 @@ export default function SessionDetailPage() {
       return;
     }
 
+    if (adminMode && isAdmin) {
+      // In admin mode any cell opens the override dialog instead of the
+      // regular unlock flow.
+      log.log("Opening admin cell dialog", cell.id);
+      setPendingCell(cell);
+      setAdminCellOpen(true);
+      return;
+    }
+
     const isMine = (cell.owner_id ?? cell.owner) === myUserId;
     log.log("Cell selected", {
       cellId: cell.id,
@@ -682,6 +743,11 @@ export default function SessionDetailPage() {
             Hide picture
           </Button>
         )}
+        {finished && (
+          <Button variant="outlined" onClick={() => setTimelapseOpen(true)}>
+            Timelapse
+          </Button>
+        )}
       </Box>
 
       <Box
@@ -833,6 +899,88 @@ export default function SessionDetailPage() {
             disabled={deleteMut.isPending}
           >
             {deleteMut.isPending ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Timelapse replay of the finished picture */}
+      <Dialog
+        open={timelapseOpen}
+        onClose={() => setTimelapseOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>Timelapse</DialogTitle>
+        <DialogContent sx={{ height: 480 }}>
+          {timelapseQuery.isLoading && (
+            <Typography sx={{ p: 2 }}>Loading timelapse…</Typography>
+          )}
+          {timelapseQuery.isError && (
+            <Alert severity="error">
+              {extractApiMessage(timelapseQuery.error)}
+            </Alert>
+          )}
+          {timelapseQuery.data && (
+            <TimelapsePlayer data={timelapseQuery.data} />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTimelapseOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Administrator cell overrides */}
+      <Dialog open={adminCellOpen} onClose={closeAdminCell}>
+        <DialogTitle>Admin: cell actions</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Cell r{pendingCell?.row ?? "?"} c{pendingCell?.col ?? "?"} · status:{" "}
+            {pendingCell?.status ?? "?"}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}>
+          <Button onClick={closeAdminCell}>Cancel</Button>
+          <Button
+            color="warning"
+            variant="outlined"
+            disabled={
+              adminSkipMut.isPending ||
+              pendingCell == null ||
+              pendingCell.status === "filled" ||
+              pendingCell.status === "orphan"
+            }
+            onClick={() =>
+              pendingCell && adminSkipMut.mutate(pendingCell.id)
+            }
+          >
+            Skip player's cell
+          </Button>
+          <Button
+            color="warning"
+            variant="outlined"
+            disabled={
+              adminFillMut.isPending ||
+              pendingCell == null ||
+              pendingCell.status === "filled"
+            }
+            onClick={() =>
+              pendingCell && adminFillMut.mutate(pendingCell.id)
+            }
+          >
+            Fill in blank
+          </Button>
+          <Button
+            variant="outlined"
+            disabled={
+              adminReleaseMut.isPending ||
+              pendingCell == null ||
+              pendingCell.status !== "unlocked"
+            }
+            onClick={() =>
+              pendingCell && adminReleaseMut.mutate(pendingCell.id)
+            }
+          >
+            Release lock
           </Button>
         </DialogActions>
       </Dialog>
